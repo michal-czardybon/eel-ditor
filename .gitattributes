@@ -1,0 +1,3 @@
+* text=auto
+# Test fixtures must stay byte-exact
+tests/**/Fixtures/** -text

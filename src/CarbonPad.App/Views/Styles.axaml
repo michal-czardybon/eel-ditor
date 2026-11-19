@@ -1,0 +1,220 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Styles.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="ChromeBrush" Color="#2B2D30" />
+          <SolidColorBrush x:Key="PanelBrush" Color="#232427" />
+          <SolidColorBrush x:Key="EditorBrush" Color="#1E1F22" />
+          <SolidColorBrush x:Key="BorderSubtleBrush" Color="#393B40" />
+          <SolidColorBrush x:Key="DimTextBrush" Color="#8B9098" />
+          <SolidColorBrush x:Key="AccentTextBrush" Color="#6CB6FF" />
+          <SolidColorBrush x:Key="ActiveItemBrush" Color="#2E436E" />
+          <SolidColorBrush x:Key="WarningBarBrush" Color="#4A3F1E" />
+          <SolidColorBrush x:Key="WarningTextBrush" Color="#F2D99B" />
+          <SolidColorBrush x:Key="GitModifiedBrush" Color="#D7BA7D" />
+          <SolidColorBrush x:Key="GitAddedBrush" Color="#73C991" />
+          <SolidColorBrush x:Key="GitUntrackedBrush" Color="#8B9098" />
+          <SolidColorBrush x:Key="GitDeletedBrush" Color="#E5807A" />
+          <SolidColorBrush x:Key="IconGrayBrush" Color="#B4B8C0" />
+          <SolidColorBrush x:Key="IconBlueBrush" Color="#6FA8E8" />
+          <SolidColorBrush x:Key="IconAmberBrush" Color="#D9B166" />
+          <SolidColorBrush x:Key="IconGreenBrush" Color="#7DC495" />
+          <SolidColorBrush x:Key="IconRedBrush" Color="#DE8580" />
+          <SolidColorBrush x:Key="IconVioletBrush" Color="#B29BE0" />
+          <SolidColorBrush x:Key="IconTealBrush" Color="#68BEC2" />
+          <SolidColorBrush x:Key="GitConflictBrush" Color="#F07178" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="ChromeBrush" Color="#F3F3F3" />
+          <SolidColorBrush x:Key="PanelBrush" Color="#F7F7F8" />
+          <SolidColorBrush x:Key="EditorBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="BorderSubtleBrush" Color="#DDDDE0" />
+          <SolidColorBrush x:Key="DimTextBrush" Color="#6E7781" />
+          <SolidColorBrush x:Key="AccentTextBrush" Color="#0969DA" />
+          <SolidColorBrush x:Key="ActiveItemBrush" Color="#D4E5FB" />
+          <SolidColorBrush x:Key="WarningBarBrush" Color="#FFF4D1" />
+          <SolidColorBrush x:Key="WarningTextBrush" Color="#5C4400" />
+          <SolidColorBrush x:Key="GitModifiedBrush" Color="#9A6700" />
+          <SolidColorBrush x:Key="GitAddedBrush" Color="#1A7F37" />
+          <SolidColorBrush x:Key="GitUntrackedBrush" Color="#6E7781" />
+          <SolidColorBrush x:Key="GitDeletedBrush" Color="#CF222E" />
+          <SolidColorBrush x:Key="IconGrayBrush" Color="#5B6370" />
+          <SolidColorBrush x:Key="IconBlueBrush" Color="#2F6FBF" />
+          <SolidColorBrush x:Key="IconAmberBrush" Color="#B07A12" />
+          <SolidColorBrush x:Key="IconGreenBrush" Color="#2E8B4E" />
+          <SolidColorBrush x:Key="IconRedBrush" Color="#C04A42" />
+          <SolidColorBrush x:Key="IconVioletBrush" Color="#7656B8" />
+          <SolidColorBrush x:Key="IconTealBrush" Color="#1E8A8E" />
+          <SolidColorBrush x:Key="GitConflictBrush" Color="#A40E26" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+
+      <!-- Spin buttons as in Windows: small up/down arrows stacked on the right (Fluent puts them side by side, up first). -->
+      <ControlTheme x:Key="{x:Type ButtonSpinner}" TargetType="ButtonSpinner" BasedOn="{StaticResource {x:Type ButtonSpinner}}">
+        <Setter Property="Template">
+          <ControlTemplate>
+            <DataValidationErrors>
+              <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}"
+                      MinHeight="{TemplateBinding MinHeight}">
+                <DockPanel>
+                  <Grid DockPanel.Dock="Right" RowDefinitions="*,*" Width="20" IsVisible="{TemplateBinding ShowButtonSpinner}">
+                    <RepeatButton Name="PART_IncreaseButton" Grid.Row="0" Classes="spin" Padding="0" Background="Transparent" BorderThickness="0"
+                                  HorizontalAlignment="Stretch" VerticalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                  IsTabStop="False">
+                      <Path Data="M0,4 L4,0 L8,4" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.2" Width="8" Height="4" Stretch="None" />
+                    </RepeatButton>
+                    <RepeatButton Name="PART_DecreaseButton" Grid.Row="1" Classes="spin" Padding="0" Background="Transparent" BorderThickness="0"
+                                  HorizontalAlignment="Stretch" VerticalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                  IsTabStop="False">
+                      <Path Data="M0,0 L4,4 L8,0" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.2" Width="8" Height="4" Stretch="None" />
+                    </RepeatButton>
+                  </Grid>
+                  <ContentPresenter Name="PART_ContentPresenter" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    Padding="{TemplateBinding Padding}" HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                </DockPanel>
+              </Border>
+            </DataValidationErrors>
+          </ControlTemplate>
+        </Setter>
+      </ControlTheme>
+
+      <!-- Toolbar icons (24x24 outline geometries). -->
+      <StreamGeometry x:Key="IconTableRowAbove">M11 1.75h2v2.25h2.25v2h-2.25v2.25h-2v-2.25h-2.25v-2h2.25zM3 10.5H8.3V14.5H3zM3 16H8.3V20H3zM9.35 10.5H14.65V14.5H9.35zM9.35 16H14.65V20H9.35zM15.7 10.5H21V14.5H15.7zM15.7 16H21V20H15.7z</StreamGeometry>
+      <StreamGeometry x:Key="IconTableRowBelow">M3 4H8.3V8H3zM3 9.5H8.3V13.5H3zM9.35 4H14.65V8H9.35zM9.35 9.5H14.65V13.5H9.35zM15.7 4H21V8H15.7zM15.7 9.5H21V13.5H15.7zM11 15.25h2v2.25h2.25v2h-2.25v2.25h-2v-2.25h-2.25v-2h2.25z</StreamGeometry>
+      <StreamGeometry x:Key="IconTableColLeft">M4 8.75h2v2.25h2.25v2h-2.25v2.25h-2v-2.25h-2.25v-2h2.25zM10.5 4H15V8.5H10.5zM10.5 9.75H15V14.25H10.5zM10.5 15.5H15V20H10.5zM16.5 4H21V8.5H16.5zM16.5 9.75H21V14.25H16.5zM16.5 15.5H21V20H16.5z</StreamGeometry>
+      <StreamGeometry x:Key="IconTableColRight">M3 4H7.5V8.5H3zM3 9.75H7.5V14.25H3zM3 15.5H7.5V20H3zM9 4H13.5V8.5H9zM9 9.75H13.5V14.25H9zM9 15.5H13.5V20H9zM18 8.75h2v2.25h2.25v2h-2.25v2.25h-2v-2.25h-2.25v-2h2.25z</StreamGeometry>
+      <StreamGeometry x:Key="IconTableDelRow">M3 4H8.3V8.5H3zM3 15.5H8.3V20H3zM9.35 4H14.65V8.5H9.35zM9.35 15.5H14.65V20H9.35zM15.7 4H21V8.5H15.7zM15.7 15.5H21V20H15.7zM3 10.75H21V13.25H3z</StreamGeometry>
+      <StreamGeometry x:Key="IconTableDelCol">M3 4H8.3V8.5H3zM3 9.75H8.3V14.25H3zM3 15.5H8.3V20H3zM15.7 4H21V8.5H15.7zM15.7 9.75H21V14.25H15.7zM15.7 15.5H21V20H15.7zM10.75 4H13.25V20H10.75z</StreamGeometry>
+      <StreamGeometry x:Key="IconTableFormat">M3 4H8.3V8.5H3zM3 9.75H8.3V14.25H3zM3 15.5H8.3V20H3zM9.35 4H14.65V8.5H9.35zM9.35 9.75H14.65V14.25H9.35zM9.35 15.5H14.65V20H9.35zM15.7 4H21V8.5H15.7zM15.7 9.75H21V14.25H15.7zM15.7 15.5H21V20H15.7z</StreamGeometry>
+      <StreamGeometry x:Key="IconPrevChange">M12 3l7 7h-4.5v7h-5v-7H5zM5 19h14v2H5z</StreamGeometry>
+      <StreamGeometry x:Key="IconNextChange">M12 21l-7-7h4.5V7h5v7H19zM5 3h14v2H5z</StreamGeometry>
+      <StreamGeometry x:Key="IconRevert">M10 6V2L3 8.5l7 6.5v-4c4.4 0 7.6 1.4 10 5-1-5.4-4.2-10-10-10z</StreamGeometry>
+      <StreamGeometry x:Key="IconRevertAll">M7 6V2L0 8.5 7 15v-3L3.5 8.5zM13 6V2L6 8.5l7 6.5v-4c4.4 0 7.6 1.4 10 5-1-5.4-4.2-10-10-10z</StreamGeometry>
+      <StreamGeometry x:Key="IconCopyRight">M3 10.5h11V5.5l7 6.5-7 6.5v-5H3z</StreamGeometry>
+      <StreamGeometry x:Key="IconCopyLeft">M21 10.5H10V5.5L3 12l7 6.5v-5h11z</StreamGeometry>
+      <StreamGeometry x:Key="IconCopyAllRight">M3 6h3l6 6-6 6H3l6-6zM11 6h3l6 6-6 6h-3l6-6z</StreamGeometry>
+      <StreamGeometry x:Key="IconCopyAllLeft">M21 6h-3l-6 6 6 6h3l-6-6zM13 6h-3l-6 6 6 6h3l-6-6z</StreamGeometry>
+      <StreamGeometry x:Key="IconWordDiff">M2 5h9v2.5H2zM2 11h5v2.5H2zm7 0h13v2.5H9zM2 17h12v2.5H2zm11-12h9v2.5h-9zM1 6.25h11v1H1z</StreamGeometry>
+      <StreamGeometry x:Key="IconSync">M7 3l5 5H8.5v8h-3V8H2zM17 21l-5-5h3.5V8h3v8H22z</StreamGeometry>
+      <StreamGeometry x:Key="IconNew">M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm0 2.5L17.5 8H14zM6 20V4h6v6h6v10zm5-8h2v2h2v2h-2v2h-2v-2H9v-2h2z</StreamGeometry>
+      <StreamGeometry x:Key="IconOpen">M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H5.5L3 18zm0 13 3-8h17l-3 8z</StreamGeometry>
+      <StreamGeometry x:Key="IconSave">M5 3h11l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 2v14h14V8.8L15.2 5H15v4H7V5zm4 0v2h4V5zm3 7a3 3 0 1 1 0 6 3 3 0 0 1 0-6z</StreamGeometry>
+      <StreamGeometry x:Key="IconSaveAll">M7 1h9l4 4v9a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2zm0 2v11h11V5.8L15.2 3H15v3H9V3zM3 6h1v12h11v2H5a2 2 0 0 1-2-2z</StreamGeometry>
+      <StreamGeometry x:Key="IconClose">M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z</StreamGeometry>
+      <StreamGeometry x:Key="IconUndo">M12.5 8c-2.6 0-5 1-6.9 2.6L2 7v9h9l-3.6-3.6A8 8 0 0 1 20.2 16l2.3-.8A10.5 10.5 0 0 0 12.5 8z</StreamGeometry>
+      <StreamGeometry x:Key="IconRedo">M11.5 8c2.6 0 5 1 6.9 2.6L22 7v9h-9l3.6-3.6A8 8 0 0 0 3.8 16l-2.3-.8A10.5 10.5 0 0 1 11.5 8z</StreamGeometry>
+      <StreamGeometry x:Key="IconCut">M9.6 8.1A4 4 0 1 0 8 9.6L10.6 12 8 14.4a4 4 0 1 0 1.6 1.5L12 13.4l7 7h3v-1zM6 8a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm0 12a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm6-7.5a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1zM19 3l-6 6 2 2 7-7V3z</StreamGeometry>
+      <StreamGeometry x:Key="IconCopy">M16 1H4a2 2 0 0 0-2 2v14h2V3h12zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11z</StreamGeometry>
+      <StreamGeometry x:Key="IconPaste">M19 2h-4.2A3 3 0 0 0 12 0a3 3 0 0 0-2.8 2H5a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm7 18H5V4h2v3h10V4h2z</StreamGeometry>
+      <StreamGeometry x:Key="IconFind">M15.5 14h-.8l-.3-.3A6.5 6.5 0 1 0 14 14.4l.3.3v.8l5 5 1.5-1.5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z</StreamGeometry>
+      <StreamGeometry x:Key="IconReplace">M3 4h8v2H3zm0 4h5v2H3zm11-4 4 4-4 4V9h-3V7h3zm-4 9h8v2h-8zm0 4h11v2H10zM7 13l-4 4 4 4v-3h3v-2H7z</StreamGeometry>
+      <StreamGeometry x:Key="IconWrap">M4 6h16v2H4zm0 12h6v2H4zm0-6h13.5a3.5 3.5 0 0 1 0 7H15v2l-3-3 3-3v2h2.5a1.5 1.5 0 0 0 0-3H4z</StreamGeometry>
+      <StreamGeometry x:Key="IconWhitespace">M10 3h9v2h-2v16h-2V5h-2v16h-2v-9a4.5 4.5 0 0 1 0-9z</StreamGeometry>
+      <StreamGeometry x:Key="IconMarkdown">M2 6h20v12H2zm2 2v8h2.5v-4.5L8.5 14l2-2.5V16H13V8h-2.5l-2 2.5-2-2.5zm12 0v4h-2l3.5 4 3.5-4h-2V8z</StreamGeometry>
+      <StreamGeometry x:Key="IconDiff">M11 3h2v18h-2zM3 5h6v2H3zm0 4h6v2H3zm0 4h6v2H3zm12-8h6v2h-6zm0 4h6v2h-6zm0 4h4v2h-4zm0 4h6v2h-6z</StreamGeometry>
+      <StreamGeometry x:Key="IconHistory">M13 3a9 9 0 0 0-9 9H1l4 4 4-4H6a7 7 0 1 1 2 4.9l-1.4 1.4A9 9 0 1 0 13 3zm-1 5v5l4.3 2.5.7-1.2-3.5-2.1V8z</StreamGeometry>
+    </ResourceDictionary>
+  </Styles.Resources>
+
+  <!-- Classic, always visible scrollbars (no overlay auto-hide). -->
+  <!-- Menus at the Windows standard size (Segoe UI 9 pt = 12 px); Fluent uses 14 px. -->
+  <Style Selector="Menu, ContextMenu, MenuItem">
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+  <Style Selector="MenuItem">
+    <Setter Property="Padding" Value="10,4" />
+  </Style>
+  <Style Selector="Menu > MenuItem">
+    <Setter Property="Padding" Value="8,3" />
+  </Style>
+
+  <!-- Tooltips stay on one line (paths); long text still fits on screen. -->
+  <Style Selector="ToolTip">
+    <Setter Property="MaxWidth" Value="1400" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+
+  <!-- Compact sidebar tabs. -->
+  <Style Selector="TabControl.side TabItem">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="Padding" Value="10,0" />
+  </Style>
+  <Style Selector="TabControl.side">
+    <Setter Property="Padding" Value="0" />
+  </Style>
+
+  <!-- Git state of files in the open-files panel. -->
+  <Style Selector="TextBlock.gitModified">
+    <Setter Property="Foreground" Value="{DynamicResource GitModifiedBrush}" />
+  </Style>
+  <Style Selector="TextBlock.gitAdded">
+    <Setter Property="Foreground" Value="{DynamicResource GitAddedBrush}" />
+  </Style>
+  <Style Selector="TextBlock.gitDeleted">
+    <Setter Property="Foreground" Value="{DynamicResource GitDeletedBrush}" />
+  </Style>
+  <Style Selector="TextBlock.gitConflict">
+    <Setter Property="Foreground" Value="{DynamicResource GitConflictBrush}" />
+  </Style>
+
+  <Style Selector="ScrollViewer">
+    <Setter Property="AllowAutoHide" Value="False" />
+  </Style>
+
+  <Style Selector="Button.tool">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="5" />
+    <Setter Property="Margin" Value="1,0" />
+    <Setter Property="CornerRadius" Value="3" />
+  </Style>
+  <Style Selector="ToggleButton.tool">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="5" />
+    <Setter Property="Margin" Value="1,0" />
+    <Setter Property="CornerRadius" Value="3" />
+  </Style>
+  <Style Selector="Button.tool PathIcon, ToggleButton.tool PathIcon">
+    <Setter Property="Width" Value="16" />
+    <Setter Property="Height" Value="16" />
+  </Style>
+  <Style Selector="Button.tool:disabled PathIcon">
+    <Setter Property="Opacity" Value="0.35" />
+  </Style>
+  <Style Selector="Border.separator">
+    <Setter Property="Width" Value="1" />
+    <Setter Property="Margin" Value="5,4" />
+    <Setter Property="Background" Value="{DynamicResource BorderSubtleBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.status">
+    <Setter Property="Margin" Value="10,0" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+  <Style Selector="Button.status">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="10,1" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.statusSep">
+    <Setter Property="Width" Value="1" />
+    <Setter Property="Margin" Value="0,3" />
+    <Setter Property="Background" Value="{DynamicResource BorderSubtleBrush}" />
+  </Style>
+
+  <Style Selector="TreeViewItem">
+    <Setter Property="MinHeight" Value="22" />
+    <Setter Property="Padding" Value="0" />
+  </Style>
+</Styles>

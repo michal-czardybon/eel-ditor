@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="UTF.Unknown" Version="2.6.0" />
+    <PackageReference Include="DiffPlex" Version="1.9.0" />
+  </ItemGroup>
+</Project>
