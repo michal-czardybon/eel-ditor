@@ -28,6 +28,7 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Lang\*.json" />
+    <EmbeddedResource Include="Syntax\*.tmLanguage.json" />
     <InternalsVisibleTo Include="EelDitor.App.Tests" />
     <AvaloniaResource Include="Views\Styles.axaml" />
     <AvaloniaResource Include="Assets/app.ico" />

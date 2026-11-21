@@ -11,6 +11,7 @@ using EelDitor.App.Editor;
 using EelDitor.App.Services;
 using EelDitor.Core.Diff;
 using EelDitor.Core.Text;
+using EelDitor.App.Syntax;
 using TextMateSharp.Grammars;
 
 namespace EelDitor.App.Views;
@@ -32,7 +33,7 @@ public sealed class DiffView : Grid
     private readonly TextBlock _rightTitle = new() { FontSize = 12, Margin = new Thickness(8, 3), TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBlock _summary = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0) };
     private readonly DispatcherTimer _recompute;
-    private readonly RegistryOptions _registry;
+    private readonly EelRegistryOptions _registry;
     private readonly TextMate.Installation? _leftTm, _rightTm;
     private DiffResult _diff;
     private bool _syncing;
@@ -64,7 +65,7 @@ public sealed class DiffView : Grid
         _words.IsVisible = false;
         _words.TextArea.TextView.LineTransformers.Add(new WordDiffColorizer(this));
 
-        _registry = new RegistryOptions(theme);
+        _registry = new EelRegistryOptions(theme);
         if (extension is not null && _registry.GetLanguageByExtension(extension) is { } lang)
         {
             string scope = _registry.GetScopeByLanguageId(lang.Id);

@@ -1,3 +1,4 @@
+using EelDitor.App.Syntax;
 using TextMateSharp.Grammars;
 
 namespace EelDitor.App.Services;
@@ -9,14 +10,14 @@ namespace EelDitor.App.Services;
 /// </summary>
 internal static class Warmup
 {
-    private static Task<RegistryOptions>? _registry;
+    private static Task<EelRegistryOptions>? _registry;
 
     public static void Start()
     {
         _registry ??= Task.Run(() =>
         {
             EelDitor.Core.Text.TextEncoding.EnsureInitialized();
-            var options = new RegistryOptions(ThemeName.DarkPlus);
+            var options = new EelRegistryOptions(ThemeName.DarkPlus);
             options.LoadTheme(ThemeName.DarkPlus);
             options.GetScopeByLanguageId("csharp"); // reads the grammar index
             StartupTrace.Mark("warm-up done (background)");
@@ -25,7 +26,7 @@ internal static class Warmup
     }
 
     /// <summary>The registry prepared in the background (waits for it if it is not ready yet).</summary>
-    public static RegistryOptions TextMateRegistry()
+    public static EelRegistryOptions TextMateRegistry()
     {
         Start();
         return _registry!.GetAwaiter().GetResult();

@@ -422,7 +422,7 @@ public partial class MainWindow
 
     // Formats shown directly in "Display as"; the rest are under "All formats".
     private static readonly string[] CommonSyntaxes =
-        ["csharp", "cpp", "c", "java", "javascript", "typescript", "python", "go", "rust", "html", "xml", "css", "json", "yaml", "sql", "powershell", "shellscript", "bat", "ini"];
+        ["csharp", "cpp", "c", "java", "javascript", "typescript", "python", "go", "rust", "html", "xml", "css", "json", "yaml", "sql", "powershell", "shellscript", "bat", "ini", "avcode"];
 
     /// <summary>"Display as ›" submenu for a document: automatic, plain text, Markdown, common languages, all languages.</summary>
     private MenuItem BuildDisplayAsMenu(EditorDocument doc)

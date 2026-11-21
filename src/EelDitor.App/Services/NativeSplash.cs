@@ -83,7 +83,11 @@ internal static unsafe partial class NativeSplash
         FillRect(dc, &rc, bg);
         DeleteObject(bg);
         int icon = (int)(64 * scale), pad = (int)(28 * scale);
-        IntPtr hIcon = ExtractIconW(GetModuleHandleW(IntPtr.Zero), Environment.ProcessPath ?? "", 0);
+        // ExtractIcon gives only the 32 px image, blurry when stretched; ask for the size drawn, so Windows
+        // picks the nearest image of the icon group (it has 16–256 px) and scales it down, not up.
+        IntPtr hIcon = IntPtr.Zero;
+        if (PrivateExtractIconsW(Environment.ProcessPath ?? "", 0, icon, icon, &hIcon, IntPtr.Zero, 1, 0) != 1)
+            hIcon = IntPtr.Zero;
         if (hIcon != IntPtr.Zero)
         {
             DrawIconEx(dc, pad, (rc.Bottom - icon) / 2, hIcon, icon, icon, 0, IntPtr.Zero, DI_NORMAL);
@@ -157,7 +161,7 @@ internal static unsafe partial class NativeSplash
     [LibraryImport("user32.dll", StringMarshalling = StringMarshalling.Utf16)] private static partial int DrawTextW(IntPtr dc, string text, int len, RECT* r, uint format);
     [LibraryImport("user32.dll")] private static partial int DrawIconEx(IntPtr dc, int x, int y, IntPtr icon, int w, int h, uint step, IntPtr brush, uint flags);
     [LibraryImport("user32.dll")] private static partial int DestroyIcon(IntPtr icon);
-    [LibraryImport("shell32.dll", StringMarshalling = StringMarshalling.Utf16)] private static partial IntPtr ExtractIconW(IntPtr inst, string file, int index);
+    [LibraryImport("user32.dll", StringMarshalling = StringMarshalling.Utf16)] private static partial uint PrivateExtractIconsW(string file, int index, int cx, int cy, IntPtr* icons, IntPtr ids, uint count, uint flags);
     [LibraryImport("kernel32.dll")] private static partial IntPtr GetModuleHandleW(IntPtr name);
     [LibraryImport("gdi32.dll")] private static partial IntPtr CreateSolidBrush(uint color);
     [LibraryImport("gdi32.dll")] private static partial int DeleteObject(IntPtr obj);

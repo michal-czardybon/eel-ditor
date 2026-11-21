@@ -13,6 +13,7 @@ using EelDitor.App.Editor;
 using EelDitor.App.Services;
 using EelDitor.Core.Files;
 using EelDitor.Core.Text;
+using EelDitor.App.Syntax;
 using TextMateSharp.Grammars;
 
 namespace EelDitor.App.Views;
@@ -24,7 +25,7 @@ public partial class MainWindow : Window
     private readonly KeyMap _keyMap = new();
     private readonly Dictionary<string, AppCommand> _commands = new();
     private readonly FileMonitor _monitor = new();
-    private readonly RegistryOptions _textMateRegistry;
+    private readonly EelRegistryOptions _textMateRegistry;
     private readonly TextMate.Installation _textMate;
     private readonly TextDocument _emptyDocument = new() { UndoStack = { SizeLimit = 0 } };
     private MarkdownView? _markdown;

@@ -1,0 +1,147 @@
+{
+  "name": "AVCODE",
+  "scopeName": "source.avcode",
+  "patterns": [
+    { "include": "#directive" },
+    { "include": "#comment" },
+    { "include": "#section" },
+    { "include": "#enum" },
+    { "include": "#struct" },
+    { "include": "#declaration" },
+    { "include": "#parameters" },
+    { "include": "#typed-variable" },
+    { "include": "#port-key" },
+    { "include": "#value" }
+  ],
+  "repository": {
+    "directive": {
+      "match": "^\\s*(//:)([A-Z_]+)(\\[[^\\]]*\\])?(.*)$",
+      "captures": {
+        "1": { "name": "punctuation.definition.directive.avcode meta.preprocessor.avcode" },
+        "2": { "name": "keyword.control.directive.avcode meta.preprocessor.avcode" },
+        "3": { "name": "variable.parameter.avcode" },
+        "4": { "name": "meta.preprocessor.string.avcode" }
+      }
+    },
+    "comment": {
+      "patterns": [
+        { "name": "comment.line.double-slash.avcode", "match": "//.*$" },
+        { "name": "comment.block.avcode", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+    "section": {
+      "match": "^\\s*(section)\\s+(\\w+)\\s*:",
+      "captures": {
+        "1": { "name": "keyword.control.section.avcode" },
+        "2": { "name": "entity.name.section.avcode" }
+      }
+    },
+    "enum": {
+      "begin": "^\\s*(enum)\\s+(\\w+)\\s*$",
+      "beginCaptures": {
+        "1": { "name": "storage.type.enum.avcode" },
+        "2": { "name": "entity.name.type.enum.avcode" }
+      },
+      "end": "^\\s*\\}",
+      "patterns": [
+        { "include": "#comment" },
+        { "match": "^\\s*(\\w+)\\s*$", "captures": { "1": { "name": "variable.other.enummember.avcode" } } }
+      ]
+    },
+    "struct": {
+      "begin": "^\\s*(struct)\\s+(\\w+)\\s*$",
+      "beginCaptures": {
+        "1": { "name": "storage.type.struct.avcode" },
+        "2": { "name": "entity.name.type.struct.avcode" }
+      },
+      "end": "^\\s*\\}",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#typed-variable" },
+        { "include": "#value" }
+      ]
+    },
+    "declaration": {
+      "patterns": [
+        {
+          "match": "^\\s*(extern)\\s+(public|private)\\s+([A-Za-z_]\\w*\\??)(?:\\s+(\\w+))?",
+          "captures": {
+            "1": { "name": "storage.modifier.avcode" },
+            "2": { "name": "storage.modifier.avcode" },
+            "3": { "name": "entity.name.type.avcode" },
+            "4": { "name": "variable.other.avcode" }
+          }
+        },
+        {
+          "begin": "^\\s*(public|private)\\s+(\\w+)\\s*(\\()",
+          "beginCaptures": {
+            "1": { "name": "storage.modifier.avcode" },
+            "2": { "name": "entity.name.function.avcode" },
+            "3": { "name": "punctuation.parenthesis.begin.avcode" }
+          },
+          "end": "(\\))\\s*(step)?",
+          "endCaptures": {
+            "1": { "name": "punctuation.parenthesis.end.avcode" },
+            "2": { "name": "storage.modifier.step.avcode" }
+          },
+          "patterns": [
+            { "match": "\\b([A-Za-z_]\\w*\\??)\\s+(\\w+)", "captures": { "1": { "name": "entity.name.type.avcode" }, "2": { "name": "variable.parameter.avcode" } } }
+          ]
+        }
+      ]
+    },
+    "parameters": {
+      "match": "^\\s*(parameters)\\s+(read|write)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.avcode" },
+        "2": { "name": "keyword.other.avcode" }
+      }
+    },
+    "typed-variable": {
+      "match": "^\\s*([A-Z]\\w*\\??)\\s+((?:in|out|diag)?\\w+)(?:\\s+(as)\\s+(\\w+))?(?=\\s*(?:=|$))",
+      "captures": {
+        "1": { "name": "entity.name.type.avcode" },
+        "2": { "name": "variable.parameter.avcode" },
+        "3": { "name": "keyword.operator.word.avcode" },
+        "4": { "name": "variable.other.avcode" }
+      }
+    },
+    "port-key": {
+      "match": "^\\s*((?:in|out|diag)\\w*(?:\\.\\w+)*|[A-Za-z_]\\w*(?:\\.\\w+)*)\\s*(:)",
+      "captures": {
+        "1": { "name": "variable.parameter.avcode" },
+        "2": { "name": "punctuation.separator.key-value.avcode" }
+      }
+    },
+    "value": {
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "match": "\\b(Nil|True|False)\\b", "name": "constant.language.avcode" },
+        { "match": "\\b(?:ext_)?con_[0-9A-Za-z_]+\\b", "name": "variable.other.connection.avcode" },
+        {
+          "match": "\\b([A-Za-z_]\\w*)(<)([^<>\\s]+\\.avdata)(>)",
+          "captures": {
+            "1": { "name": "entity.name.type.avcode" },
+            "2": { "name": "punctuation.definition.generic.begin.avcode" },
+            "3": { "name": "string.unquoted.avdata.avcode" },
+            "4": { "name": "punctuation.definition.generic.end.avcode" }
+          }
+        },
+        { "match": "(?<![\\w.])-?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?\\b", "name": "constant.numeric.avcode" },
+        { "match": "\\b(and|or|not|mod|xor)\\b", "name": "keyword.operator.word.avcode" },
+        { "match": "^\\s*([A-Za-z_]\\w*)(<[^>\\n]*>)?\\s*$", "captures": { "1": { "name": "entity.name.function.avcode" }, "2": { "name": "entity.name.type.avcode" } } },
+        { "match": "\\b([A-Z]\\w*)(?=\\s*\\()", "name": "entity.name.type.avcode" },
+        { "match": "(?<=:[ \\t])[A-Za-z_]\\w*(?:\\s*,\\s*[A-Za-z_]\\w*)*\\b(?![(<])", "name": "constant.other.enum.avcode" }
+      ]
+    },
+    "string": {
+      "name": "string.quoted.double.avcode",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        { "match": "\\\\.", "name": "constant.character.escape.avcode" }
+      ]
+    }
+  }
+}
