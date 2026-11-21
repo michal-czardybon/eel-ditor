@@ -19,7 +19,8 @@ public sealed class AppSettings
     public double FontSize { get; set; } = 13;
     public int TabSize { get; set; } = 4;
     public bool UseSpaces { get; set; } = true;
-    public bool WordWrap { get; set; }
+    /// <summary>On by default: long lines (one line per paragraph) and wide tables fit the window.</summary>
+    public bool WordWrap { get; set; } = true;
     public bool ShowSpacesAndTabs { get; set; }
     public bool ShowEndOfLine { get; set; }
     public bool ShowLineNumbers { get; set; } = true;

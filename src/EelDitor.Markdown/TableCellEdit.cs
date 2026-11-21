@@ -20,7 +20,7 @@ public static partial class TableCellEdit
 
     /// <summary>
     /// Writes <paramref name="newSource"/> (the cell's Markdown, as edited in the cell editor) into the cell.
-    /// Line breaks become spaces and bare | are escaped; when backticks would open a code span that swallows the
+    /// Line breaks become <c>&lt;br&gt;</c> and bare | are escaped; when backticks would open a code span that swallows the
     /// following pipes, the unmatched ones are escaped. The result must keep the same cells with the other cells
     /// unchanged, otherwise nothing is written.
     /// </summary>
@@ -29,7 +29,9 @@ public static partial class TableCellEdit
         var (row, _) = ParseRow(line, headerLine, separatorLine, isHeader);
         if (row is null || cellIndex >= row.Cells.Count) return new Result(null, Problem.CellCount);
         var cell = row.Cells[cellIndex];
-        string source = EscapeBarePipes(newSource.Replace("\r\n", " ").Replace('\n', ' ').Replace('\r', ' ').Trim());
+        // A table row is one line: a line break in the cell is written as <br>.
+        string source = EscapeBarePipes(string.Join("<br>", newSource.Replace("\r\n", "\n").Replace('\r', '\n').Trim()
+            .Split('\n').Select(part => part.Trim())));
         var problem = Problem.CellCount;
         string safe = EscapeUnmatchedBackticks(source);
         foreach (string body in new[] { source, safe, DoubleTrailingBackslash(safe) })

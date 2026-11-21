@@ -290,7 +290,14 @@ public partial class MainWindow
             else if (InMarkdown)
             {
                 menu.Items.Add(new Separator());
-                foreach (var id in new[] { "md.bold", "md.italic", "md.strike", "md.code", "md.highlight", "md.task", "md.image", "md.table.insert" }) menu.Items.Add(Item(id, track: false));
+                foreach (var id in new[] { "md.bold", "md.italic", "md.strike", "md.code", "md.highlight", "md.sub", "md.sup", "md.clearFormat" }) menu.Items.Add(Item(id, track: false));
+                var heading = Sub("Menu.Md.Heading");
+                foreach (var id in new[] { "md.h1", "md.h2", "md.h3", "md.h4", "md.h5", "md.h6", "md.h0" }) heading.Items.Add(Item(id, track: false));
+                menu.Items.Add(heading);
+                menu.Items.Add(new Separator());
+                if (MarkdownCommands.InList(Editor, _markdown!))
+                    foreach (var id in new[] { "md.list.itemAbove", "md.list.itemBelow" }) menu.Items.Add(Item(id, track: false));
+                foreach (var id in new[] { "md.task", "md.image", "md.table.insert" }) menu.Items.Add(Item(id, track: false));
             }
         };
         Editor.ContextMenu = menu;

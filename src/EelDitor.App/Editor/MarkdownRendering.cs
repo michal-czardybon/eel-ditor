@@ -39,7 +39,13 @@ public sealed class MarkdownView : IDisposable
     private readonly MarkdownColorizer _colorizer;
     private readonly WidgetGenerator _widgets;
     private readonly TableGridGenerator _grid;
+    private readonly RuleGenerator _rules;
+    private readonly RuleRenderer _ruleRenderer;
     private readonly LineHeightPrimer _primer;
+    private readonly GridRowCaretRenderer _rowCaret;
+    private readonly LongLineGenerators _longLines;
+    private readonly GridTextSelection _gridSelection;
+    private readonly IBrush? _caretBrush;
     private bool _disposed;
 
     public MarkdownView(TextEditor editor, TextDocument document, EditorPalette palette, string? baseDirectory = null)
@@ -64,8 +70,21 @@ public sealed class MarkdownView : IDisposable
         tv.ElementGenerators.Insert(1, _widgets);
         tv.ElementGenerators.Insert(2, _padding);
         tv.ElementGenerators.Insert(3, _hidden);
+        // Horizontal rules: drawn across the view.
+        _rules = new RuleGenerator(this);
+        tv.ElementGenerators.Insert(4, _rules);
+        _ruleRenderer = new RuleRenderer(this);
+        tv.BackgroundRenderers.Add(_ruleRenderer);
 
+        // Lines over 3000 characters (long table rows) get the generated elements too; this must run first.
+        _longLines = new LongLineGenerators(tv);
+        tv.LineTransformers.Insert(0, _longLines);
         tv.LineTransformers.Add(_colorizer);
+        // On a table row drawn as a grid the caret would be as tall as the row: it is hidden and the row is
+        // outlined instead.
+        _caretBrush = editor.TextArea.Caret.CaretBrush;
+        _rowCaret = new GridRowCaretRenderer(this);
+        tv.BackgroundRenderers.Add(_rowCaret);
         _document.Changed += OnDocumentChanged;
         editor.TextArea.AddHandler(InputElement.PointerPressedEvent, OnPointerPressed, RoutingStrategies.Tunnel);
         editor.TextArea.TextEntering += OnTextEntering;
@@ -77,12 +96,27 @@ public sealed class MarkdownView : IDisposable
 
         // The real heights of tall lines (tables as grids, images…), so the scrollbar is right from the start.
         _primer = new LineHeightPrimer(editor, this);
+        // After OnPointerPressed (registered above): a double click on a cell opens the cell editor first.
+        _gridSelection = new GridTextSelection(this);
         tv.PropertyChanged += OnTextViewPropertyChanged;
         editor.PropertyChanged += OnEditorPropertyChanged;
         _primer.All();
     }
 
     internal TextDocument Document => _document;
+
+    private Func<string, string>? _wordTransform;
+
+    /// <summary>Converts the words of table cells drawn as grids (the Cyrillic view); null: shown as written.</summary>
+    public Func<string, string>? WordTransform
+    {
+        get => _wordTransform;
+        set
+        {
+            _wordTransform = value;
+            if (!_disposed) _editor.TextArea.TextView.Redraw();
+        }
+    }
 
     private double _primedWidth;
 
@@ -100,6 +134,38 @@ public sealed class MarkdownView : IDisposable
     {
         if (e.Property == TextEditor.WordWrapProperty || e.Property == TextEditor.FontSizeProperty || e.Property == TextEditor.FontFamilyProperty)
             _primer.All();
+        if (e.Property == TextEditor.WordWrapProperty) UpdateGridCaret();
+    }
+
+    /// <summary>The selection of shown text in tables drawn as grids.</summary>
+    internal GridTextSelection GridSelection => _gridSelection;
+
+    /// <summary>The line is a table row drawn as one grid row (one element for the whole line).</summary>
+    internal bool IsGridRow(DocumentLine line) =>
+        TablesAsGrid && line.Length > 0 && Model.TableAtLine(line.LineNumber - 1)?.RowAtLine(line.LineNumber - 1) is not null;
+
+    /// <summary>The caret's line when it is a grid row (then the caret itself is hidden), else null.</summary>
+    internal DocumentLine? CaretGridRow
+    {
+        get
+        {
+            if (_disposed || !ReferenceEquals(_editor.Document, _document)) return null;
+            var line = _document.GetLineByOffset(Math.Min(_editor.CaretOffset, _document.TextLength));
+            return IsGridRow(line) ? line : null;
+        }
+    }
+
+    private bool _caretHidden;
+
+    private void UpdateGridCaret()
+    {
+        bool hide = CaretGridRow is not null;
+        if (hide != _caretHidden)
+        {
+            _caretHidden = hide;
+            _editor.TextArea.Caret.CaretBrush = hide ? Brushes.Transparent : _caretBrush;
+        }
+        _editor.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
     }
 
     /// <summary>
@@ -203,6 +269,7 @@ public sealed class MarkdownView : IDisposable
     private void OnCaretPositionChanged(object? sender, EventArgs e)
     {
         if (_pendingOffset >= 0 && _editor.CaretOffset != _pendingOffset) ClearPendingStyle();
+        UpdateGridCaret();
         if (_snapPosted) return;
         _snapPosted = true;
         Dispatcher.UIThread.Post(SnapCaret, DispatcherPriority.Send);
@@ -416,6 +483,7 @@ public sealed class MarkdownView : IDisposable
         // Markdown files are small enough to reparse on every change; this keeps rendering exact.
         Model = MarkdownDocument.Parse(Source);
         ClearPendingStyle();
+        UpdateGridCaret();
         ModelChanged?.Invoke(this, EventArgs.Empty);
         _editor.TextArea.TextView.Redraw();
         // An edited table can change the column widths, and so the height of rows out of view.
@@ -425,7 +493,10 @@ public sealed class MarkdownView : IDisposable
 
     public LineRender RenderFor(DocumentLine line) => Model.GetLine(line.LineNumber - 1);
 
-    /// <summary>AvaloniaEdit's VisualLine.LENGTH_LIMIT: longer lines get no element generators (no zero-width elements, no padding).</summary>
+    /// <summary>
+    /// AvaloniaEdit's VisualLine.LENGTH_LIMIT: longer lines get no element generators from AvaloniaEdit (no zero-width
+    /// elements, no padding); <see cref="LongLineGenerators"/> runs them for those lines.
+    /// </summary>
     public const int GeneratorLineLimit = 3000;
 
     public void Dispose()
@@ -435,19 +506,25 @@ public sealed class MarkdownView : IDisposable
         _editor.TextArea.Caret.PositionChanged -= OnCaretPositionChanged;
         var tv = _editor.TextArea.TextView;
         _primer.Dispose();
+        _gridSelection.Dispose();
         tv.PropertyChanged -= OnTextViewPropertyChanged;
         _editor.PropertyChanged -= OnEditorPropertyChanged;
         tv.ElementGenerators.Remove(_grid);
+        tv.BackgroundRenderers.Remove(_rowCaret);
+        if (_caretHidden) _editor.TextArea.Caret.CaretBrush = _caretBrush;
 
         tv.ElementGenerators.Remove(_widgets);
         tv.ElementGenerators.Remove(_padding);
         tv.ElementGenerators.Remove(_hidden);
+        tv.ElementGenerators.Remove(_rules);
+        tv.BackgroundRenderers.Remove(_ruleRenderer);
         _editor.TextArea.RemoveHandler(InputElement.PointerPressedEvent, OnPointerPressed);
         _editor.TextArea.TextEntering -= OnTextEntering;
         _editor.TextArea.TextEntered -= OnTextEntered;
         tv.PointerHover -= OnPointerHover;
         tv.PointerHoverStopped -= OnPointerHoverStopped;
         tv.LineTransformers.Remove(_colorizer);
+        tv.LineTransformers.Remove(_longLines);
         tv.Redraw();
     }
 }
@@ -508,7 +585,7 @@ internal sealed class PaddingGenerator(MarkdownView view) : VisualLineElementGen
 /// <summary>
 /// Replaces markup characters (**, _, `, #, link targets) with zero-width elements.
 /// AvaloniaEdit does not run element generators for lines longer than <see cref="MarkdownView.GeneratorLineLimit"/>;
-/// on those lines <see cref="MarkdownColorizer"/> collapses the markup instead.
+/// <see cref="LongLineGenerators"/> runs them (or, if it cannot, <see cref="MarkdownColorizer"/> collapses the markup).
 /// </summary>
 internal sealed class HiddenMarkupGenerator(MarkdownView view) : VisualLineElementGenerator
 {
@@ -619,6 +696,10 @@ internal sealed class MarkdownColorizer(MarkdownView view, EditorPalette palette
                 return;
         }
 
+        // <br>: a line break in a table cell (drawn as one in the grid); in the text it stays, dimmed.
+        foreach (var b in render.Breaks)
+            if (b.End <= line.Length) Change(o + b.Start, o + b.End, el => el.TextRunProperties.SetForegroundBrush(Palette.Dim));
+
         foreach (var s in render.Styles)
         {
             var style = s.Style;
@@ -658,10 +739,19 @@ internal sealed class MarkdownColorizer(MarkdownView view, EditorPalette palette
                     p.SetTypeface(new Typeface(p.Typeface.FontFamily, FontStyle.Italic, p.Typeface.Weight, p.Typeface.Stretch));
                 }
                 if (style.HasFlag(MdStyle.TaskDone)) p.SetForegroundBrush(Palette.Dim);
+                if (style.HasFlag(MdStyle.Subscript) || style.HasFlag(MdStyle.Superscript))
+                {
+                    p.SetFontRenderingEmSize(p.FontRenderingEmSize * 0.75);
+                    p.SetBaselineAlignment(style.HasFlag(MdStyle.Subscript) ? BaselineAlignment.Subscript : BaselineAlignment.Superscript);
+                }
             });
         }
 
-        if (line.Length > MarkdownView.GeneratorLineLimit)
+        // Headings: the level shows in the size (the font stays monospace; headings are not aligned with anything).
+        if (render.Kind == MdLineKind.Heading && HeadingScale(render.HeadingLevel) is var scale and > 1)
+            Change(o, o + line.Length, el => el.TextRunProperties.SetFontRenderingEmSize(el.TextRunProperties.FontRenderingEmSize * scale));
+
+        if (line.Length > MarkdownView.GeneratorLineLimit && !LongLineGenerators.Supported)
         {
             // Long line: the hidden-markup generator is not run, so draw the markers transparent and
             // practically zero-width. The characters stay in the text (the caret logic skips them as usual).
@@ -689,6 +779,9 @@ internal sealed class MarkdownColorizer(MarkdownView view, EditorPalette palette
     {
         if (end > start) ChangeLinePart(start, end, action);
     }
+
+    /// <summary>Font size of a heading relative to the text: # 1.5×, ## 1.3×, ### 1.15×, deeper levels as the text.</summary>
+    public static double HeadingScale(int level) => level switch { 1 => 1.5, 2 => 1.3, 3 => 1.15, _ => 1.0 };
 }
 
 
@@ -894,7 +987,7 @@ internal sealed class TableGridGenerator(MarkdownView view) : VisualLineElementG
         _lineOffset = -1;
         if (!view.TablesAsGrid) return;
         var line = context.VisualLine.FirstDocumentLine;
-        if (line.Length == 0 || line.Length > MarkdownView.GeneratorLineLimit) return;
+        if (line.Length == 0) return;
         if (view.Model.TableAtLine(line.LineNumber - 1) is not { } table || table.RowAtLine(line.LineNumber - 1) is not { } row) return;
         _lineOffset = line.Offset;
         _lineLength = line.Length;
@@ -911,14 +1004,14 @@ internal sealed class TableGridGenerator(MarkdownView view) : VisualLineElementG
         var layout = Layout(_table);
         string text = CurrentContext.Document.GetText(_line.Offset, _line.Length);
         var render = view.RenderFor(_line);
-        var cells = new List<List<StyledLine>>();
+        var cells = new List<GridCell>();
         var aligns = new List<ColumnAlignment>();
         for (int c = 0; c < layout.Widths.Length; c++)
         {
             var (cellText, styles) = c < _row.Cells.Count && _row.Kind != MdLineKind.TableSeparator
                 ? TableWrap.StyledCellText(text, _row.Cells[c], render) : ("", []);
-            cells.Add(TableWrap.WrapRanges(cellText, layout.Widths[c])
-                .Select(r => new StyledLine(cellText.Substring(r.Start, r.Length), styles[r.Start..(r.Start + r.Length)])).ToList());
+            if (view.WordTransform is { } transform) (cellText, styles) = CyrillicViewGenerator.ConvertStyled(cellText, styles, transform);
+            cells.Add(new GridCell(cellText, styles, TableWrap.WrapRanges(cellText, layout.Widths[c])));
             aligns.Add(c < _table.Alignments.Count ? _table.Alignments[c] : ColumnAlignment.None);
         }
         bool first = _row.LineIndex == _table.FirstLine, last = _row.LineIndex == _table.LastLine;
@@ -926,17 +1019,99 @@ internal sealed class TableGridGenerator(MarkdownView view) : VisualLineElementG
     }
 }
 
+/// <summary>Outlines the grid row the caret is on (its caret is hidden: it would be as tall as the row).</summary>
+internal sealed class GridRowCaretRenderer(MarkdownView view) : IBackgroundRenderer
+{
+    public KnownLayer Layer => KnownLayer.Background;
+
+    public void Draw(TextView textView, DrawingContext drawingContext)
+    {
+        if (view.CaretGridRow is not { } line || !textView.VisualLinesValid) return;
+        var visual = textView.GetVisualLine(line.LineNumber);
+        if (visual is null || visual.Elements.Count == 0 || visual.Elements[0] is not TableRowElement el) return;
+        double x = visual.GetVisualPosition(0, VisualYPosition.LineTop).X - textView.ScrollOffset.X;
+        double y = visual.VisualTop - textView.ScrollOffset.Y;
+        double width = TableWrap.GridWidth(el.Layout.Widths) * textView.WideSpaceWidth;
+        var rect = new Rect(x - 2, y, width + 4, visual.Height);
+        drawingContext.FillRectangle(view.Palette.CurrentLine, rect);
+        drawingContext.DrawRectangle(null, new Pen(view.Palette.Accent, 1.5), rect.Deflate(0.75), 2, 2);
+    }
+}
+
 /// <summary>One wrapped line of a cell: its text and the Markdown style of every character.</summary>
 internal sealed record StyledLine(string Text, MdStyle[] Styles);
 
-internal sealed class TableRowElement(int documentLength, TableGridLayout layout, List<List<StyledLine>> cells,
+/// <summary>A cell of a grid row: its shown text, the style of every character, and its wrapped lines (ranges of the text).</summary>
+internal sealed record GridCell(string Text, MdStyle[] Styles, List<(int Start, int Length)> Ranges)
+{
+    public List<StyledLine> Lines => Ranges.Select(r => new StyledLine(Text.Substring(r.Start, r.Length), Styles[r.Start..(r.Start + r.Length)])).ToList();
+}
+
+internal sealed class TableRowElement(int documentLength, TableGridLayout layout, List<GridCell> cells,
     List<ColumnAlignment> aligns, MdLineKind kind, bool first, bool last, EditorPalette palette) : VisualLineElement(1, documentLength)
 {
+    private List<BoxLines.Line>? _lines;
+
     public TableGridLayout Layout { get; } = layout;
 
+    public IReadOnlyList<GridCell> Cells => cells;
+
+    public MdLineKind Kind => kind;
+
+    /// <summary>The drawn lines (borders and text lines).</summary>
+    public List<BoxLines.Line> Lines => _lines ??= BoxLines.For(Layout.Widths, cells.Select(c => c.Lines).ToList(), aligns, kind, first, last);
+
+    /// <summary>Drawn lines above the first text line (the table's top border).</summary>
+    private int TopLines => kind != MdLineKind.TableSeparator && first ? 1 : 0;
+
+    /// <summary>Character column where text line <paramref name="line"/> of <paramref name="cell"/> is drawn.</summary>
+    private int ColumnOf(int cell, int line) =>
+        Lines[TopLines + line].Cells is { } parts && cell < parts.Count ? parts[cell].Column : TableWrap.BorderAt(Layout.Widths, cell) + 2;
+
+    /// <summary>
+    /// The cell and the position in its text at a point given in character columns and drawn line index from the
+    /// element's top left; null on the separator row.
+    /// </summary>
+    public (int Cell, int Offset)? Hit(double column, int drawnLine)
+    {
+        if (kind == MdLineKind.TableSeparator || cells.Count == 0) return null;
+        var widths = Layout.Widths;
+        int cell = 0;
+        while (cell + 1 < widths.Length && column >= TableWrap.BorderAt(widths, cell + 1)) cell++;
+        var g = cells[cell];
+        int line = drawnLine - TopLines;
+        if (line < 0) return (cell, 0);
+        if (line >= g.Ranges.Count) return (cell, g.Text.Length);
+        var (start, length) = g.Ranges[line];
+        double x = ColumnOf(cell, line);
+        int k = 0;
+        while (k < length)
+        {
+            int w = TextWidth.Of(g.Text.AsSpan(start + k, 1));
+            if (column < x + w / 2.0) break;
+            x += w;
+            k++;
+        }
+        return (cell, start + k);
+    }
+
+    /// <summary>Rectangles (in character columns and drawn lines) covering characters [from, to) of a cell's text.</summary>
+    public IEnumerable<(int Column, int Line, int Width)> Spans(int cell, int from, int to)
+    {
+        if (cell >= cells.Count) yield break;
+        var g = cells[cell];
+        for (int l = 0; l < g.Ranges.Count; l++)
+        {
+            var (start, length) = g.Ranges[l];
+            int a = Math.Max(from, start), b = Math.Min(to, start + length);
+            if (b <= a) continue;
+            int col = ColumnOf(cell, l) + TextWidth.Of(g.Text.AsSpan(start, a - start));
+            yield return (col, TopLines + l, TextWidth.Of(g.Text.AsSpan(a, b - a)));
+        }
+    }
+
     public override TextRun CreateTextRun(int startVisualColumn, ITextRunConstructionContext context) =>
-        new TableRowRun(TextRunProperties, context.TextView.WideSpaceWidth, context.TextView.DefaultLineHeight,
-            BoxLines.For(Layout.Widths, cells, aligns, kind, first, last), kind, palette);
+        new TableRowRun(TextRunProperties, context.TextView.WideSpaceWidth, context.TextView.DefaultLineHeight, Lines, kind, palette);
 }
 
 /// <summary>
@@ -1036,10 +1211,13 @@ internal sealed class TableRowRun(TextRunProperties properties, double charWidth
                     var rect = new Rect(origin.X + x * charWidth, y, width * charWidth, lineHeight);
                     if (style.HasFlag(MdStyle.Code)) context.FillRectangle(palette.CodeBackground, rect);
                     if (style.HasFlag(MdStyle.Highlight)) context.FillRectangle(palette.Highlight, rect);
-                    var ft = new FormattedText(run, culture, FlowDirection.LeftToRight, face, size, brush);
+                    // Sub- and superscripts: smaller and shifted, but in their own cells, so the grid stays aligned.
+                    bool sub = style.HasFlag(MdStyle.Subscript), sup = style.HasFlag(MdStyle.Superscript);
+                    var ft = new FormattedText(run, culture, FlowDirection.LeftToRight, face, sub || sup ? size * 0.75 : size, brush);
                     if (style.HasFlag(MdStyle.Strike)) ft.SetTextDecorations(TextDecorations.Strikethrough);
                     else if (style.HasFlag(MdStyle.Link)) ft.SetTextDecorations(TextDecorations.Underline);
-                    context.DrawText(ft, new Point(rect.X, y + dy));
+                    double shift = sup ? -lineHeight * 0.12 : sub ? lineHeight * 0.22 : 0;
+                    context.DrawText(ft, new Point(rect.X, y + dy + shift));
                     x += width;
                     k = j;
                 }
@@ -1047,3 +1225,52 @@ internal sealed class TableRowRun(TextRunProperties properties, double charWidth
         }
     }
 }
+
+
+/// <summary>A horizontal rule line (<c>---</c>): its characters are replaced by one empty element; <see cref="RuleRenderer"/> draws the line.</summary>
+internal sealed class RuleGenerator(MarkdownView view) : VisualLineElementGenerator
+{
+    private int _offset = -1, _length;
+
+    public override void StartGeneration(ITextRunConstructionContext context)
+    {
+        base.StartGeneration(context);
+        var line = context.VisualLine.FirstDocumentLine;
+        bool rule = line.Length > 0 && view.RenderFor(line).Kind == MdLineKind.Rule;
+        (_offset, _length) = rule ? (line.Offset, line.Length) : (-1, 0);
+    }
+
+    public override int GetFirstInterestedOffset(int startOffset) => _offset >= startOffset ? _offset : -1;
+
+    public override VisualLineElement? ConstructElement(int offset) => offset == _offset ? new RuleElement(_length) : null;
+}
+
+/// <summary>The characters of a rule: nothing is drawn, the line keeps its height; one caret stop.</summary>
+internal sealed class RuleElement(int documentLength) : WholeElement(documentLength)
+{
+    public override TextRun CreateTextRun(int startVisualColumn, ITextRunConstructionContext context) =>
+        new ZeroWidthRun(TextRunProperties, context.TextView.DefaultLineHeight, RunLength(startVisualColumn));
+}
+
+/// <summary>Draws every horizontal rule across the whole width of the view (in the accent colour on the caret's line).</summary>
+internal sealed class RuleRenderer(MarkdownView view) : IBackgroundRenderer
+{
+    public KnownLayer Layer => KnownLayer.Background;
+
+    public void Draw(TextView textView, DrawingContext drawingContext)
+    {
+        if (!textView.VisualLinesValid) return;
+        int caretLine = view.Editor.TextArea.Caret.Line;
+        foreach (var visual in textView.VisualLines)
+        {
+            var line = visual.FirstDocumentLine;
+            if (line.Length == 0 || view.RenderFor(line).Kind != MdLineKind.Rule) continue;
+            double x = visual.GetVisualPosition(0, VisualYPosition.LineTop).X - textView.ScrollOffset.X;
+            double y = Math.Round(visual.VisualTop - textView.ScrollOffset.Y + visual.Height / 2) + 0.5;
+            bool atCaret = line.LineNumber == caretLine;
+            var pen = new Pen(atCaret ? view.Palette.Accent : view.Palette.Dim, atCaret ? 2 : 1);
+            drawingContext.DrawLine(pen, new Point(Math.Max(0, x), y), new Point(textView.Bounds.Width - 6, y));
+        }
+    }
+}
+

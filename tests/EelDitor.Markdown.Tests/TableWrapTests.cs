@@ -71,4 +71,30 @@ public class TableWrapStyleTests
         var r = TableWrap.WrapRanges("ala ma  kota", 6);
         Assert.Equal([(0, 6), (8, 4)], r);
     }
+
+    [Theory]
+    [InlineData("<br>", 4)]
+    [InlineData("<BR>", 4)]
+    [InlineData("<br/>", 5)]
+    [InlineData("<br />", 6)]
+    [InlineData("<b>", 0)]
+    [InlineData("<br", 0)]
+    [InlineData("<bra>", 0)]
+    public void BreakTags_AreRecognized(string tag, int length) => Assert.Equal(length, InlineParser.BreakTagLength(tag, 0, tag.Length));
+
+    [Fact]
+    public void BrInACell_IsANewLine_ButNotInsideCode()
+    {
+        string line = "| jeden <br> **dwa**<br/>trzy | `x<br>y` |";
+        var md = MarkdownDocument.Parse("| a | b |\n|---|---|\n" + line);
+        var row = md.Tables[0].Rows[2];
+        var render = md.GetLine(2);
+        var (text, styles) = TableWrap.StyledCellText(line, row.Cells[0], render);
+        Assert.Equal("jeden\ndwa\ntrzy", text);
+        Assert.Equal(MdStyle.Bold, styles[text.IndexOf("dwa", StringComparison.Ordinal)]);
+        Assert.Equal("x<br>y", TableWrap.CellText(line, row.Cells[1], render));
+        Assert.Equal([5, 6], TableWrap.NaturalWidths(md.Tables[0], new StringLineSource("| a | b |\n|---|---|\n" + line), md.GetLine));
+        Assert.Equal(["jeden", "dwa", "trzy"], TableWrap.WrapCell(text, 10));
+        Assert.Equal(["ab", "cd", "", "e"], TableWrap.WrapCell("ab cd\n\ne", 2));
+    }
 }

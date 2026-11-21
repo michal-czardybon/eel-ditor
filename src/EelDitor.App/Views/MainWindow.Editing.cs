@@ -446,6 +446,20 @@ public partial class MainWindow
 
     // ---------------------------------------------------------------- markdown
 
+    private void ClearFormatting()
+    {
+        if (_markdown is null || Editor.IsReadOnly) return;
+        var (cleared, skipped) = MarkdownCommands.ClearFormatting(Editor, _markdown);
+        SetStatusMessage(skipped > 0 ? Loc.T("Md.ClearedSkipped", cleared, skipped) : Loc.T("Md.Cleared", cleared));
+    }
+
+    private void ConvertStyle(MdStyle from, MdStyle to)
+    {
+        if (_markdown is null || Editor.IsReadOnly) return;
+        var (converted, skipped) = MarkdownCommands.ConvertStyle(Editor, _markdown, from, to);
+        SetStatusMessage(skipped > 0 ? Loc.T("Convert.DoneSkipped", converted, skipped) : Loc.T("Convert.Done", converted));
+    }
+
     private void MdStyleToggle(string marker, MdStyle style)
     {
         if (_markdown is null) return;
@@ -460,6 +474,7 @@ public partial class MainWindow
         {
             _markdown?.Dispose();
             _markdown = _settings.MarkdownRaw ? null : CreateMarkdownView(_active);
+            if (_cyrillicView is not null) ApplyCyrillicView(_active);
         }
         RefreshCommandStates();
         UpdateStatus();

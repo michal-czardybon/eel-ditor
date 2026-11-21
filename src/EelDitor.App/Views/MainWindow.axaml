@@ -30,13 +30,13 @@
           <Border x:Name="StatusMdSep" Classes="statusSep" IsVisible="False" DockPanel.Dock="Left" />
           <TextBlock x:Name="StatusLength" Classes="status" DockPanel.Dock="Left" />
           <Border Classes="statusSep" DockPanel.Dock="Left" />
+          <TextBlock x:Name="StatusLongest" Classes="status" IsVisible="False" DockPanel.Dock="Left" />
+          <Border x:Name="StatusLongestSep" Classes="statusSep" IsVisible="False" DockPanel.Dock="Left" />
           <TextBlock x:Name="StatusMessage" Classes="status" Foreground="{DynamicResource DimTextBrush}" TextTrimming="CharacterEllipsis" />
         </DockPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal">
           <TextBlock x:Name="StatusPosition" Classes="status" />
           <Border Classes="statusSep" />
-          <Button x:Name="StatusWrap" Classes="status" />
-          <Border x:Name="StatusWrapSep" Classes="statusSep" />
           <Button x:Name="StatusEol" Classes="status" />
           <Border Classes="statusSep" />
           <Button x:Name="StatusEncoding" Classes="status" />
@@ -77,7 +77,7 @@
                   </Grid>
                 </TreeDataTemplate>
                 <DataTemplate DataType="doc:EditorDocument">
-                  <Grid ColumnDefinitions="*,Auto" Background="Transparent">
+                  <Grid ColumnDefinitions="*,Auto" Background="Transparent" Classes="fileRow">
                     <ToolTip.Tip>
                       <TextBlock Text="{Binding Tooltip}" TextWrapping="NoWrap" />
                     </ToolTip.Tip>
@@ -85,17 +85,21 @@
                                Classes.active="{Binding IsActive}"
                                Classes.gitModified="{Binding GitModified}" Classes.gitAdded="{Binding GitAdded}"
                                Classes.gitDeleted="{Binding GitDeleted}" Classes.gitConflict="{Binding GitConflict}" />
-                    <TextBlock Grid.Column="1" Text="{Binding GitBadge}" FontSize="11" FontWeight="SemiBold" Margin="6,0,6,0"
-                               VerticalAlignment="Center"
-                               Classes.gitModified="{Binding GitModified}" Classes.gitAdded="{Binding GitAdded}"
-                               Classes.gitDeleted="{Binding GitDeleted}" Classes.gitConflict="{Binding GitConflict}" />
+                    <!-- The git status letter; on hover a close button takes its place. -->
+                    <Panel Grid.Column="1" MinWidth="22">
+                      <TextBlock Classes="gitBadge" Text="{Binding GitBadge}" FontSize="11" FontWeight="SemiBold" Margin="6,0,6,0"
+                                 VerticalAlignment="Center" HorizontalAlignment="Center"
+                                 Classes.gitModified="{Binding GitModified}" Classes.gitAdded="{Binding GitAdded}"
+                                 Classes.gitDeleted="{Binding GitDeleted}" Classes.gitConflict="{Binding GitConflict}" />
+                      <Button Classes="rowClose" Content="✕" ToolTip.Tip="{loc:T Menu.File.Close}" />
+                    </Panel>
                   </Grid>
                 </DataTemplate>
               </TreeView.DataTemplates>
             </TreeView>
           </Grid>
         </TabItem>
-        <TabItem Header="{loc:T Side.Git}" x:Name="GitTab">
+        <TabItem Header="{loc:T Side.Git}" x:Name="GitTab" ToolTip.Tip="{loc:T Side.GitTip}">
           <Border x:Name="GitHost" />
         </TabItem>
         <TabItem Header="{loc:T Side.Map}" x:Name="MapTab">

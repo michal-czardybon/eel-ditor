@@ -239,6 +239,158 @@ public static class MarkdownCommands
     }
 
     /// <summary>How a candidate line is checked: as a row of its table, or as an ordinary line.</summary>
+    /// <summary>
+    /// Writes the spans of one style as another (highlight ↔ bold ↔ italic) in the selection, or in the whole document
+    /// without one; one undo step. Returns how many spans were converted and how many had to be left as they are.
+    /// </summary>
+    public static (int Converted, int Skipped) ConvertStyle(TextEditor editor, MarkdownView view, MdStyle from, MdStyle to)
+    {
+        var doc = editor.Document;
+        bool selection = editor.SelectionLength > 0;
+        int selStart = selection ? editor.SelectionStart : 0, selEnd = selection ? editor.SelectionStart + editor.SelectionLength : doc.TextLength;
+        int first = doc.GetLineByOffset(selStart).LineNumber, last = doc.GetLineByOffset(selEnd).LineNumber;
+        int converted = 0, skipped = 0;
+        using (doc.RunUpdate())
+        {
+            for (int n = first; n <= last; n++)
+            {
+                var line = doc.GetLineByNumber(n);
+                if (view.RenderFor(line).Kind is MdLineKind.Code or MdLineKind.FenceDelimiter) continue;
+                string text = doc.GetText(line);
+                int start = Math.Max(0, selStart - line.Offset), end = Math.Min(text.Length, selEnd - line.Offset);
+                if (end <= start && selection) continue;
+                string result = StyleConversion.Convert(text, from, to, start, selection ? end : text.Length, ParserFor(view, doc, n), out int c, out int s);
+                converted += c;
+                skipped += s;
+                if (result != text) ReplaceDifference(doc, line.Offset, text, result);
+            }
+        }
+        return (converted, skipped);
+    }
+
+    /// <summary>
+    /// Removes all inline formatting (bold, italic, strikethrough, highlight, code, sub/superscript, links) from the
+    /// selection, or from the spans at the caret; one undo step. Returns the spans cleared and those left as they are.
+    /// </summary>
+    public static (int Cleared, int Skipped) ClearFormatting(TextEditor editor, MarkdownView view)
+    {
+        var doc = editor.Document;
+        int selStart = editor.SelectionLength > 0 ? editor.SelectionStart : editor.CaretOffset;
+        int selEnd = editor.SelectionLength > 0 ? editor.SelectionStart + editor.SelectionLength : editor.CaretOffset;
+        int first = doc.GetLineByOffset(selStart).LineNumber, last = doc.GetLineByOffset(selEnd).LineNumber;
+        int cleared = 0, skipped = 0;
+        using (doc.RunUpdate())
+        {
+            for (int n = first; n <= last; n++)
+            {
+                var line = doc.GetLineByNumber(n);
+                if (view.RenderFor(line).Kind is MdLineKind.Code or MdLineKind.FenceDelimiter) continue;
+                string text = doc.GetText(line);
+                int start = Math.Clamp(selStart - line.Offset, 0, text.Length), end = Math.Clamp(selEnd - line.Offset, 0, text.Length);
+                if (end <= start && selStart != selEnd) continue;
+                string result = StyleConversion.Clear(text, start, end, ParserFor(view, doc, n), out int c, out int s);
+                cleared += c;
+                skipped += s;
+                if (result != text) ReplaceDifference(doc, line.Offset, text, result);
+            }
+        }
+        return (cleared, skipped);
+    }
+
+    // ---------------------------------------------------------------- lists
+
+    private static List<string> AllLines(TextDocument doc) => doc.Lines.Select(l => doc.GetText(l)).ToList();
+
+    /// <summary>Applies a list change: the new line, the renumbered items, the caret at the new item's text.</summary>
+    private static void Apply(TextEditor editor, ListEdit.Change change, int? replaceFrom = null)
+    {
+        var doc = editor.Document;
+        string nl = AvaloniaEdit.Document.TextUtilities.GetNewLineFromDocument(doc, Math.Max(1, Math.Min(change.InsertAt, doc.LineCount)));
+        using (doc.RunUpdate())
+        {
+            if (replaceFrom is int from)
+            {
+                // Enter inside an item: the rest of the line goes to the new item.
+                var line = doc.GetLineByNumber(change.InsertAt);
+                doc.Replace(from, line.EndOffset - from, nl + change.Text);
+            }
+            else if (change.InsertAt < doc.LineCount)
+                doc.Insert(doc.GetLineByNumber(change.InsertAt + 1).Offset, change.Text + nl);
+            else
+                doc.Insert(doc.TextLength, nl + change.Text);
+            foreach (var (index, text) in change.Renumbered)
+            {
+                var l = doc.GetLineByNumber(index + 1);
+                ReplaceDifference(doc, l.Offset, doc.GetText(l), text);
+            }
+            var newLine = doc.GetLineByNumber(change.InsertAt + 1);
+            editor.TextArea.ClearSelection();
+            editor.CaretOffset = newLine.Offset + Math.Min(change.CaretColumn, newLine.Length);
+        }
+    }
+
+    /// <summary>The caret's line is a Markdown list item (or a line of one), outside tables and code.</summary>
+    public static bool InList(TextEditor editor, MarkdownView view)
+    {
+        var doc = editor.Document;
+        var line = doc.GetLineByOffset(editor.CaretOffset);
+        if (view.RenderFor(line).Kind != MdLineKind.Normal || view.Model.TableAtLine(line.LineNumber - 1) is not null) return false;
+        if (ListEdit.Parse(doc.GetText(line)) is not null) return true;
+        // A continuation line: look up a few lines for its item.
+        var lines = new List<string>();
+        for (int n = Math.Max(1, line.LineNumber - 50); n <= line.LineNumber; n++) lines.Add(doc.GetText(doc.GetLineByNumber(n)));
+        return ListEdit.ItemStart(lines, lines.Count - 1) >= 0;
+    }
+
+    /// <summary>A new empty item before or after the caret's item; an ordered list is renumbered.</summary>
+    public static bool InsertListItem(TextEditor editor, MarkdownView view, bool after)
+    {
+        if (!InList(editor, view)) return false;
+        var doc = editor.Document;
+        int index = doc.GetLineByOffset(editor.CaretOffset).LineNumber - 1;
+        if (ListEdit.InsertItem(AllLines(doc), index, after) is not { } change) return false;
+        Apply(editor, change);
+        return true;
+    }
+
+    /// <summary>
+    /// Enter on a list item's line: the rest of the line becomes the next item (renumbered); on an empty item the
+    /// marker goes and the list ends. Shift+Enter: a new line inside the item, indented to its text.
+    /// </summary>
+    public static bool HandleListEnter(TextEditor editor, MarkdownView view, bool shift)
+    {
+        if (editor.SelectionLength > 0 || editor.IsReadOnly) return false;
+        var doc = editor.Document;
+        var line = doc.GetLineByOffset(editor.CaretOffset);
+        string text = doc.GetText(line);
+        if (view.RenderFor(line).Kind != MdLineKind.Normal || view.Model.TableAtLine(line.LineNumber - 1) is not null) return false;
+        if (ListEdit.Parse(text) is not { } item) return false;
+        int col = editor.CaretOffset - line.Offset;
+        if (col < item.ContentStart) return false;
+        string nl = AvaloniaEdit.Document.TextUtilities.GetNewLineFromDocument(doc, line.LineNumber);
+        if (shift)
+        {
+            string indent = item.Prefix + new string(' ', item.ContentStart - item.Prefix.Length);
+            doc.Insert(editor.CaretOffset, nl + indent);
+            return true;
+        }
+        if (ListEdit.IsEmptyItem(text))
+        {
+            doc.Replace(line.Offset, line.Length, "");
+            return true;
+        }
+        using (doc.RunUpdate())
+        {
+            // Enter inside bold, italic…: the markers are closed and reopened around the break.
+            PrepareLineBreakInStyle(editor, view);
+            line = doc.GetLineByOffset(editor.CaretOffset);
+            int caretCol = editor.CaretOffset - line.Offset;
+            if (ListEdit.SplitItem(AllLines(doc), line.LineNumber - 1, caretCol) is not { } change) return false;
+            Apply(editor, change, editor.CaretOffset);
+        }
+        return true;
+    }
+
     private static Func<string, LineRender?> ParserFor(MarkdownView view, TextDocument doc, int lineNumber)
     {
         if (view.Model.TableAtLine(lineNumber - 1) is { } table && table.RowAtLine(lineNumber - 1) is { } row)
@@ -629,6 +781,14 @@ public static class MarkdownCommands
         var doc = editor.Document;
         int caret = editor.CaretOffset;
         var line = doc.GetLineByOffset(caret);
+        if (view.RenderFor(line).Kind == MdLineKind.Rule)
+        {
+            // A horizontal rule is drawn across the view: Backspace or Delete anywhere on it removes the whole line.
+            int start = line.Offset, end = line.EndOffset + line.DelimiterLength;
+            if (line.DelimiterLength == 0 && line.PreviousLine is { } previous) start = previous.EndOffset;
+            doc.Remove(start, end - start);
+            return true;
+        }
         int col = caret - line.Offset;
         // A table drawn as a grid shows a row as one element: the default deletion would take the whole row.
         // Rows are edited in the cell editor; only joining with the neighbouring line stays.

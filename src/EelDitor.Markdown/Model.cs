@@ -18,6 +18,10 @@ public enum MdStyle
     Image = 256,
     /// <summary>Text of a completed task <c>- [x] …</c>.</summary>
     TaskDone = 512,
+    /// <summary><c>~x~</c> (Pandoc, markdown-it) or <c>&lt;sub&gt;x&lt;/sub&gt;</c>.</summary>
+    Subscript = 1024,
+    /// <summary><c>^x^</c> (Pandoc, markdown-it) or <c>&lt;sup&gt;x&lt;/sup&gt;</c>.</summary>
+    Superscript = 2048,
 }
 
 /// <summary>An image: <see cref="AnchorStart"/>/<see cref="AnchorLength"/> is the hidden tail (<c>](path)</c>) where the preview is drawn.</summary>
@@ -32,6 +36,8 @@ public enum MdLineKind
     TableHeader,
     TableSeparator,
     TableBody,
+    /// <summary>A horizontal rule: <c>---</c>, <c>***</c>, <c>___</c> (not a setext heading underline, not front matter).</summary>
+    Rule,
 }
 
 /// <summary>A run of source characters that is not displayed (markup).</summary>
@@ -57,6 +63,17 @@ public sealed class LineRender
     public List<StyledRange> Styles { get; } = [];
     public List<Padding> Paddings { get; } = [];
     public List<ImageRef> Images { get; } = [];
+
+    /// <summary>HTML line breaks <c>&lt;br&gt;</c> (also <c>&lt;br/&gt;</c>, <c>&lt;br /&gt;</c>): a new line inside a table cell.</summary>
+    public List<HiddenRange> Breaks { get; } = [];
+
+    /// <summary>The line break tag starting at <paramref name="column"/>, if any.</summary>
+    public HiddenRange? BreakAt(int column)
+    {
+        foreach (var b in Breaks)
+            if (b.Start == column) return b;
+        return null;
+    }
 
     /// <summary>Column of a task box <c>[ ]</c>/<c>[x]</c> (three characters), or -1.</summary>
     public int TaskColumn { get; init; } = -1;

@@ -29,6 +29,8 @@ public partial class MainWindow : Window
     private readonly TextMate.Installation _textMate;
     private readonly TextDocument _emptyDocument = new() { UndoStack = { SizeLimit = 0 } };
     private MarkdownView? _markdown;
+
+    internal MarkdownView? MarkdownViewForTests => _markdown;
     private EditorDocument? _active;
     private bool _closingConfirmed;
 
@@ -67,6 +69,15 @@ public partial class MainWindow : Window
         ApplyThemeToEditor();
 
         FilesTree.SelectionChanged += OnTreeSelectionChanged;
+        // ✕ on a hovered row closes that file (asking about unsaved changes as usual), without activating it first.
+        FilesTree.AddHandler(Button.ClickEvent, (_, e) =>
+        {
+            if (e.Source is Button { Classes: var c, DataContext: EditorDocument doc } && c.Contains("rowClose"))
+            {
+                e.Handled = true;
+                _ = CloseDocumentAsync(doc);
+            }
+        });
         FilesTree.ContainerPrepared += OnTreeContainerPrepared;
         _files.GroupsRebuilt += (_, _) => SyncTreeSelection();
         AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel);
@@ -78,15 +89,6 @@ public partial class MainWindow : Window
         Activated += (_, _) => PollFilesOnDisk();
         ActualThemeVariantChanged += (_, _) => ApplyThemeToEditor();
         StatusEol.Click += (_, _) => ShowEolMenu(StatusEol);
-        StatusWrap.Click += (_, _) =>
-        {
-            var menu = new ContextMenu();
-            foreach (var id in new[] { "wrap.oneLine", "wrap.80", "wrap.120", "wrap.sentences" }) menu.Items.Add(Item(id, track: false));
-            menu.Items.Add(new Separator());
-            menu.Items.Add(Item("wrap.reflow", track: false));
-            menu.Open(StatusWrap);
-        };
-        ToolTip.SetTip(StatusWrap, Loc.T("Wrap.Tip"));
         StatusEncoding.Click += (_, _) => ShowEncodingMenu(StatusEncoding);
         StatusIndent.Click += (_, _) => ShowIndentMenu(StatusIndent);
         StatusMdView.Click += (_, _) => { ToggleMarkdownRaw(); Editor.Focus(); };
@@ -142,26 +144,35 @@ public partial class MainWindow : Window
         return max;
     }
 
-    /// <summary>Hard-wraps the long lines of the document at spaces (Markdown structure preserved); one undo step.</summary>
     /// <summary>
-    /// The long-lines notice: splits every long prose line (longer than the width, or than 120 characters for
-    /// sentences). Lines are only split, never joined, so only the long lines change; the result can be checked
-    /// as a word diff, which shows that no word changed.
+    /// Converts the whole file to a line-break convention ("Current file: … ▾"), one undo step. Breaking at a width or
+    /// at sentences splits every long prose line (longer than the width, or than 120 characters for sentences); one
+    /// line per paragraph joins the lines of each paragraph. Only line breaks change, never a word, which the word
+    /// diff offered afterwards shows. When there is nothing to convert, nothing changes and no notice is shown.
     /// </summary>
     private void WrapLongLines(EditorDocument d, EelDitor.Core.Text.WrapMode mode)
     {
         var doc = d.Document;
         string text = doc.Text;
-        int minLength = mode.Width() ?? 120;
-        string wrapped = EelDitor.Core.Text.ParagraphWrap.SplitLongLines(text, mode, d.IsMarkdown, d.Eol.ToNewLine(), minLength);
-        int changed = 0;
-        if (wrapped != text)
+        string wrapped;
+        int joined = 0;
+        if (mode == EelDitor.Core.Text.WrapMode.OneLine)
+            (wrapped, joined) = EelDitor.Core.Text.ParagraphWrap.JoinParagraphs(text, d.IsMarkdown);
+        else
+            wrapped = EelDitor.Core.Text.ParagraphWrap.SplitLongLines(text, mode, d.IsMarkdown, d.Eol.ToNewLine(), mode.Width() ?? 120);
+        if (wrapped == text)
         {
-            changed = EelDitor.Core.Diff.LineDiff.Compute(text, wrapped).Blocks.Sum(b => b.OldCount);
-            doc.Replace(0, doc.TextLength, wrapped);
+            SetStatusMessage(Loc.T("Info.NothingToConvert"));
+            return;
         }
-        d.ReflowNotice = Loc.T("Info.Reflowed", changed, LongestLine(doc));
+        int changed = EelDitor.Core.Diff.LineDiff.Compute(text, wrapped).Blocks.Sum(b => b.OldCount);
+        doc.Replace(0, doc.TextLength, wrapped);
+        d.ReflowNotice = mode == EelDitor.Core.Text.WrapMode.OneLine
+            ? Loc.T("Info.Joined", changed, joined)
+            : Loc.T("Info.Reflowed", changed, LongestLine(doc));
+        d.ReflowVersion = doc.Version;
         UpdateInfoBar();
+        UpdateStatus();
     }
 
     /// <summary>A prose document: Markdown or plain text (never source code).</summary>
@@ -231,14 +242,6 @@ public partial class MainWindow : Window
         UpdateStatus();
         RefreshCommandStates();
     }
-
-    private static string WrapModeLabel(EelDitor.Core.Text.WrapMode mode) => mode switch
-    {
-        EelDitor.Core.Text.WrapMode.Width80 => Loc.T("Wrap.Width", 80),
-        EelDitor.Core.Text.WrapMode.Width120 => Loc.T("Wrap.Width", 120),
-        EelDitor.Core.Text.WrapMode.Sentences => Loc.T("Wrap.Sentences"),
-        _ => Loc.T("Wrap.OneLine"),
-    };
 
     /// <summary>A saved position on a monitor that is no longer connected: center on the primary screen.</summary>
     private void EnsureOnScreen()
@@ -328,7 +331,13 @@ public partial class MainWindow : Window
             Zoom(e.Delta.Y > 0 ? 1 : -1);
             e.Handled = true;
         }, RoutingStrategies.Tunnel);
-        Editor.TextChanged += (_, _) => UpdateLengthStatus();
+        Editor.TextChanged += (_, _) =>
+        {
+            UpdateLengthStatus();
+            DropStaleNotices();
+            // The file's convention, longest line and line endings: whole-text scans, so not on every key press.
+            ScheduleTextSettled();
+        };
     }
 
     private EditorPalette Palette => ActualThemeVariant == Avalonia.Styling.ThemeVariant.Light ? EditorPalette.Light : EditorPalette.Dark;
@@ -409,31 +418,31 @@ public partial class MainWindow : Window
 
     private CyrillicViewGenerator? _cyrillicView;
 
-    /// <summary>Cyrillic display of the active document: read-only while on, Markdown rendering paused.</summary>
+    /// <summary>Cyrillic display of the active document: read-only while on; Markdown formatting stays.</summary>
     private void ApplyCyrillicView(EditorDocument doc)
     {
         _cyrillicView?.Dispose();
         _cyrillicView = null;
-        if (doc.CyrillicView is { } variant)
+        if (doc.CyrillicView is { } id)
         {
-            _markdown?.Dispose();
-            _markdown = null;
-            _cyrillicView = new CyrillicViewGenerator(variant, Editor.TextArea);
+            _cyrillicView = new CyrillicViewGenerator(id, Editor.TextArea, _markdown);
             Editor.IsReadOnly = true;
         }
         Editor.TextArea.TextView.Redraw();
     }
 
-    private void SetCyrillicView(EelDitor.Core.Text.CyrillicVariant? variant)
+    private void SetCyrillicView(string? id)
     {
         if (_active is not { } doc) return;
-        doc.CyrillicView = variant;
+        doc.CyrillicView = id;
         Editor.IsReadOnly = false;
+        _cyrillicView?.Dispose();
+        _cyrillicView = null;
         _markdown?.Dispose();
         _markdown = null;
         ApplySyntax(doc);
         ApplyCyrillicView(doc);
-        SetStatusMessage(variant is null ? "" : Loc.T("Cyrillic.ViewOn"));
+        SetStatusMessage(id is null ? "" : Loc.T("Cyrillic.ViewOn"));
         RefreshCommandStates();
     }
 
@@ -488,6 +497,7 @@ public partial class MainWindow : Window
         {
             _textMate.SetGrammar(null);
             if (!_settings.MarkdownRaw) _markdown = CreateMarkdownView(doc);
+            if (_cyrillicView is not null) ApplyCyrillicView(doc); // it keeps the Markdown view it formats with
             doc.SyntaxName = "Markdown";
             return;
         }
@@ -605,6 +615,8 @@ public partial class MainWindow : Window
     private bool _altShortcutUsed;
 
     private static bool AllowedWhileComparing(AppCommand c) =>
+        // Undo/redo go to the diff's editable side (also from the word view, which shows a copy).
+        c.Id is "edit.undo" or "edit.redo" ||
         !(c.Id.StartsWith("edit.", StringComparison.Ordinal)
           || c.Id.StartsWith("md.", StringComparison.Ordinal)
           || (c.Id.StartsWith("search.", StringComparison.Ordinal) && c.Id is not ("search.findInFiles" or "search.nextResult" or "search.prevResult")));
@@ -637,6 +649,10 @@ public partial class MainWindow : Window
             case Key.Delete when e.KeyModifiers == KeyModifiers.None:
                 if (MarkdownCommands.HandleDelete(Editor, _markdown, e.Key == Key.Back)) e.Handled = true;
                 break;
+            case Key.Enter when plain:
+                // In a list: the next item (renumbered), or Shift+Enter for a line inside the item.
+                if (MarkdownCommands.HandleListEnter(Editor, _markdown, shift)) { e.Handled = true; Editor.TextArea.Caret.BringCaretToView(); }
+                break;
         }
     }
 
@@ -665,8 +681,7 @@ public partial class MainWindow : Window
         StatusMdView.Content = Loc.T(_settings.MarkdownRaw ? "Status.MdPlain" : "Status.MdFormatted");
         StatusEol.Content = _active.EolMixed ? $"{Loc.T("Status.Mixed")} ({_active.Eol.ShortName()})" : _active.Eol.DisplayName();
         StatusEncoding.Content = _active.Encoding.DisplayName + (_active.IsLossyDecode ? " ⚠" : "");
-        StatusWrap.IsVisible = StatusWrapSep.IsVisible = IsProseDocument(_active);
-        StatusWrap.Content = Loc.T("Status.Wrap", WrapModeLabel(_settings.ParagraphWrap));
+        UpdateParagraphTools();
         StatusIndent.Content = Editor.Options.ConvertTabsToSpaces
             ? Loc.T("Status.Spaces", Editor.Options.IndentationSize)
             : Loc.T("Status.Tabs", Editor.Options.IndentationSize);
@@ -745,11 +760,11 @@ public partial class MainWindow : Window
             Button(Loc.T("Info.ReopenAs"), () => ShowEncodingMenu(InfoBarButtons.Children[0] as Control ?? InfoBar, reopen: true));
             Button(Loc.T("Info.Dismiss"), () => { d.IsLossyDecode = false; UpdateInfoBar(); });
         }
-        else if (d.EolMixed)
+        else if (d.EolMixed && !d.EolMixedAccepted)
         {
             InfoBarText.Text = Loc.T("Info.MixedEol", d.Eol.ShortName());
             Button(Loc.T("Info.Unify", d.Eol.ShortName()), () => ConvertEol(d.Eol));
-            Button(Loc.T("Info.Leave"), () => { d.EolMixed = false; UpdateInfoBar(); UpdateStatus(); });
+            Button(Loc.T("Info.Leave"), () => { d.EolMixedAccepted = true; UpdateInfoBar(); UpdateStatus(); });
         }
         else if (d.ReflowNotice is { } notice)
         {
@@ -757,14 +772,6 @@ public partial class MainWindow : Window
             if (d.FilePath is not null)
                 Button(Loc.T("Info.ShowWordDiff"), () => { d.ReflowNotice = null; _settings.DiffWordMode = true; UpdateInfoBar(); _ = CompareWithDiskAsync(d); });
             Button(Loc.T("Info.Ok"), () => { d.ReflowNotice = null; UpdateInfoBar(); });
-        }
-        else if (!d.IsLarge && !d.LongLinesDismissed && LongestLine(d.Document) is var longest && longest > EelDitor.Core.Text.LineWrap.LongLineThreshold)
-        {
-            InfoBarText.Text = Loc.T("Info.LongLines", longest);
-            Button(Loc.T("Info.WrapTo", 80), () => WrapLongLines(d, EelDitor.Core.Text.WrapMode.Width80));
-            Button(Loc.T("Info.WrapTo", 120), () => WrapLongLines(d, EelDitor.Core.Text.WrapMode.Width120));
-            Button(Loc.T("Info.WrapSentences"), () => WrapLongLines(d, EelDitor.Core.Text.WrapMode.Sentences));
-            Button(Loc.T("Info.Dismiss"), () => { d.LongLinesDismissed = true; UpdateInfoBar(); });
         }
         else
         {

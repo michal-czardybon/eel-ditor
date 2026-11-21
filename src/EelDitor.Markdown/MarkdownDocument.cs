@@ -31,6 +31,9 @@ public sealed partial class MarkdownDocument
     [GeneratedRegex(@"^ {0,3}(`{3,}|~{3,})")]
     private static partial Regex FenceRegex();
 
+    [GeneratedRegex(@"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")]
+    private static partial Regex RuleRegex();
+
     [GeneratedRegex(@"^ {0,3}(#{1,6})(?:[ \t]+|$)")]
     private static partial Regex HeadingRegex();
 
@@ -49,7 +52,14 @@ public sealed partial class MarkdownDocument
         var tables = new List<MarkdownTable>();
         string? fence = null;
 
-        for (int i = 0; i < n; i++)
+        // YAML front matter (--- … --- or ...): data, shown as it is.
+        int frontMatter = -1;
+        if (n > 1 && source.GetLine(0).TrimEnd() == "---")
+            for (int k = 1; k < Math.Min(n, 500); k++)
+                if (source.GetLine(k).TrimEnd() is "---" or "...") { frontMatter = k; break; }
+        for (int k = 0; k <= frontMatter; k++) lines[k] = LineRender.Plain;
+
+        for (int i = frontMatter + 1; i < n; i++)
         {
             string line = source.GetLine(i);
 
@@ -90,6 +100,14 @@ public sealed partial class MarkdownDocument
                 }
                 TableLayout.ComputePaddings(table, source, lines);
                 i = table.LastLine;
+                continue;
+            }
+
+            // A horizontal rule; "---" right under a paragraph line is a setext heading underline instead (left as text).
+            if (RuleRegex().IsMatch(line) && !(line.TrimStart()[0] == '-' && i > 0 && source.GetLine(i - 1).Trim().Length > 0
+                    && lines[i - 1] is { Kind: MdLineKind.Normal, TableIndex: < 0 } && ListEdit.Parse(source.GetLine(i - 1)) is null))
+            {
+                lines[i] = new LineRender { Kind = MdLineKind.Rule };
                 continue;
             }
 
@@ -143,7 +161,7 @@ public sealed partial class MarkdownDocument
         return new MarkdownDocument(lines, tables);
     }
 
-    private static bool HasInlineCandidates(string line) => line.AsSpan().IndexOfAny("*_~`[=\\") >= 0;
+    private static bool HasInlineCandidates(string line) => line.AsSpan().IndexOfAny("*_~`[=\\<^") >= 0;
 
     /// <summary>Line index of the definition <c>[^label]: …</c>, or -1.</summary>
     public int FootnoteDefinitionLine(string label)

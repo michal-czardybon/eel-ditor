@@ -12,7 +12,7 @@ public static class TableWrap
 {
     public const int MinColumnWidth = 4;
 
-    /// <summary>The text a cell shows: its content without the hidden markup.</summary>
+    /// <summary>The text a cell shows: its content without the hidden markup; a <c>&lt;br&gt;</c> is a new line.</summary>
     public static string CellText(string line, TableCell cell, LineRender render)
     {
         int start = cell.ContentStart(line), end = cell.ContentEnd(line);
@@ -20,6 +20,7 @@ public static class TableWrap
         var sb = new StringBuilder(end - start);
         for (int i = start; i < end; i++)
         {
+            if (render.BreakAt(i) is { } br) { TrimEndSpaces(sb); sb.Append('\n'); i = br.End - 1; SkipSpaces(line, ref i, end); continue; }
             if (render.IsHidden(i)) continue;
             if (line[i] == '\\' && i + 1 < end && line[i + 1] == '|') continue; // \| shows as |
             sb.Append(line[i]);
@@ -76,10 +77,25 @@ public static class TableWrap
 
     /// <summary>
     /// Word wrap as ranges of <paramref name="text"/> (so styles can follow the text): lines break at spaces,
-    /// the spaces at a break are dropped, a word longer than the width is cut.
+    /// the spaces at a break are dropped, a word longer than the width is cut; '\n' (a <c>&lt;br&gt;</c>) always breaks.
     /// </summary>
     public static List<(int Start, int Length)> WrapRanges(string text, int width)
     {
+        if (text.Contains('\n'))
+        {
+            var all = new List<(int, int)>();
+            int from = 0;
+            while (true)
+            {
+                int nl = text.IndexOf('\n', from);
+                int to = nl < 0 ? text.Length : nl;
+                foreach (var (s0, l0) in WrapRanges(text[from..to], width)) all.Add((from + s0, l0));
+                if (nl < 0) break;
+                from = nl + 1;
+            }
+            return all;
+        }
+
         width = Math.Max(1, width);
         var lines = new List<(int, int)>();
         int lineStart = -1, lineEnd = -1, lineWidth = 0, i = 0;
@@ -121,6 +137,15 @@ public static class TableWrap
         var styles = new List<MdStyle>();
         for (int i = start; i < end; i++)
         {
+            if (render.BreakAt(i) is { } br)
+            {
+                while (sb.Length > 0 && sb[^1] == ' ') { sb.Length--; styles.RemoveAt(styles.Count - 1); }
+                sb.Append('\n');
+                styles.Add(MdStyle.None);
+                i = br.End - 1;
+                SkipSpaces(line, ref i, end);
+                continue;
+            }
             if (render.IsHidden(i)) continue;
             if (line[i] == '\\' && i + 1 < end && line[i + 1] == '|') continue;
             var style = MdStyle.None;
@@ -130,6 +155,25 @@ public static class TableWrap
             styles.Add(style);
         }
         return (sb.ToString(), styles.ToArray());
+    }
+
+    private static void TrimEndSpaces(StringBuilder sb)
+    {
+        while (sb.Length > 0 && sb[^1] == ' ') sb.Length--;
+    }
+
+    /// <summary>Moves <paramref name="i"/> (the last character handled) over the spaces that follow it.</summary>
+    private static void SkipSpaces(string line, ref int i, int end)
+    {
+        while (i + 1 < end && line[i + 1] == ' ') i++;
+    }
+
+    /// <summary>The widest line of a cell's text (its lines are separated by '\n').</summary>
+    public static int WidestLine(string text)
+    {
+        int widest = 0;
+        foreach (var part in text.Split('\n')) widest = Math.Max(widest, TextWidth.Of(part));
+        return widest;
     }
 
     /// <summary>The natural (unwrapped) width of every column of a table.</summary>
@@ -142,7 +186,7 @@ public static class TableWrap
             string line = source.GetLine(row.LineIndex);
             var r = render(row.LineIndex);
             for (int c = 0; c < Math.Min(row.Cells.Count, widths.Length); c++)
-                widths[c] = Math.Max(widths[c], TextWidth.Of(CellText(line, row.Cells[c], r)));
+                widths[c] = Math.Max(widths[c], WidestLine(CellText(line, row.Cells[c], r)));
         }
         return widths;
     }

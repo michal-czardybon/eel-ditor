@@ -62,10 +62,11 @@ public partial class MainWindow
         var cell = row.Cells[cellIndex];
         int cs = cell.ContentStart(lineText), ce = cell.ContentEnd(lineText);
         string original = ce > cs ? lineText[cs..ce] : "";
+        // <br> tags are line breaks in the editor (Shift+Enter); saving turns the line breaks back into <br>.
+        foreach (var br in view.RenderFor(line).Breaks.Where(b => b.Start >= cs && b.End <= ce).OrderByDescending(b => b.Start))
+            original = original[..(br.Start - cs)].TrimEnd(' ') + "\n" + original[(br.End - cs)..].TrimStart(' ');
 
-        double lineHeight = Editor.TextArea.TextView.DefaultLineHeight;
-        double width = Math.Clamp(rect.Width, 260, 720);
-        int lines = Math.Clamp((int)Math.Ceiling(original.Length * Editor.TextArea.TextView.WideSpaceWidth / (width - 20)), 1, 6);
+        var (width, height) = CellEditorSize(original, rect.Width);
         var editor = new TextEditor
         {
             Document = new TextDocument(original),
@@ -74,7 +75,7 @@ public partial class MainWindow
             WordWrap = true,
             ShowLineNumbers = false,
             Width = width,
-            Height = (lines + 1) * lineHeight + 6,
+            Height = height,
             Padding = new Thickness(4, 2),
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
@@ -113,6 +114,7 @@ public partial class MainWindow
         bool Save()
         {
             if (saved || cancelled) return true;
+            if (editor.Document.Text == original) { saved = true; return true; } // unchanged (keeps the <br> as written)
             var problem = CommitCell(lineNumber, cellIndex, editor.Document.Text);
             if (problem is null) { saved = true; return true; }
             CellEditorError = Loc.T(problem);
@@ -144,6 +146,8 @@ public partial class MainWindow
                     Editor.Focus();
                     e.Handled = true;
                     break;
+                case Key.Enter when shift && !ctrl:
+                    break; // a new line: a <br> in the cell
                 case Key.Enter:
                     e.Handled = true;
                     if (!Save()) return;
@@ -179,6 +183,46 @@ public partial class MainWindow
         editor.Focus();
         editor.TextArea.Focus();
         editor.SelectAll();
+    }
+
+    /// <summary>
+    /// The cell editor's size: at least the cell, wider for long text, and tall enough for the whole text plus room
+    /// to type, so that a scroll bar is needed only for very long cells (more than most of the window).
+    /// </summary>
+    internal (double Width, double Height) CellEditorSize(string text, double cellWidth)
+    {
+        var tv = Editor.TextArea.TextView;
+        double charWidth = Math.Max(1, tv.WideSpaceWidth), lineHeight = tv.DefaultLineHeight;
+        double viewWidth = tv.Bounds.Width > 0 ? tv.Bounds.Width : 1000, viewHeight = tv.Bounds.Height > 0 ? tv.Bounds.Height : 700;
+        const double chrome = 4 * 2 + 20; // padding and a possible scroll bar
+        double maxWidth = Math.Max(320, Math.Min(viewWidth - 24, 110 * charWidth + chrome));
+        int Lines(double w) => WrappedLineCount(text, Math.Max(10, (int)((w - chrome) / charWidth)));
+        double width = Math.Clamp(cellWidth, Math.Min(320, maxWidth), maxWidth);
+        // Long text: rather wider than very tall.
+        if (Lines(width) > 6) width = maxWidth;
+        double maxHeight = Math.Max(4 * lineHeight, viewHeight * 0.75);
+        double height = Math.Min(maxHeight, (Lines(width) + 2) * lineHeight + 6);
+        return (width, height);
+    }
+
+    /// <summary>How many lines <paramref name="text"/> takes when word-wrapped at <paramref name="columns"/>.</summary>
+    internal static int WrappedLineCount(string text, int columns)
+    {
+        int count = 0;
+        foreach (var para in text.Split('\n'))
+        {
+            int col = 0;
+            count++;
+            foreach (var word in para.Split(' '))
+            {
+                int len = word.Length;
+                if (col > 0 && col + 1 + len > columns) { count++; col = 0; }
+                else if (col > 0) col++;
+                while (len > columns) { count++; len -= columns; }
+                col += len;
+            }
+        }
+        return Math.Max(1, count);
     }
 
     private void MoveToCell(int lineNumber, int cellIndex, bool backwards)

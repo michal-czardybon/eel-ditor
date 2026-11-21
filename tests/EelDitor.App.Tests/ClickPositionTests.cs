@@ -77,7 +77,7 @@ public class ClickPositionTests
     public void ClicksLandOnTheWord_InTheCyrillicView()
     {
         var w = Open("Litwo ojczyzno moja ty jesteś jak zdrowie\n", wrap: false);
-        w.RunCommand("view.cyrA");
+        w.RunCommand("view.cyr.plA");
         Dispatcher.UIThread.RunJobs();
         var tv = w.Editor.TextArea.TextView;
         tv.EnsureVisualLines();

@@ -38,7 +38,8 @@ public sealed record GitRow(GitEntry Entry, bool Staged)
 /// </summary>
 public sealed class GitPanel : DockPanel
 {
-    private readonly TextBlock _repo = new() { FontWeight = FontWeight.SemiBold, FontSize = 13, TextTrimming = Trimming.Leading };
+    // Shortened by whole leading folders ("…\src\Project"), like the folders of the open files.
+    private readonly PathTextBlock _repo = new() { FontWeight = FontWeight.SemiBold, FontSize = 13 };
     private readonly TextBlock _branch = new() { FontSize = 12 };
     private readonly TextBox _message = new()
     {
@@ -112,13 +113,14 @@ public sealed class GitPanel : DockPanel
         _push.IsEnabled = status is not null;
         if (status is null)
         {
-            _repo.Text = Loc.T("Git.NoRepository");
+            _repo.FullPath = Loc.T("Git.NoRepository");
+            ToolTip.SetTip(_repo, null);
             _branch.Text = "";
             _unstaged.ItemsSource = _staged.ItemsSource = null;
             _info.Text = info ?? "";
             return;
         }
-        _repo.Text = status.Root;
+        _repo.FullPath = status.Root;
         ToolTip.SetTip(_repo, status.Root);
         string tracking = !status.HasUpstream ? Loc.T("Git.NoUpstream")
             : status.Ahead == 0 && status.Behind == 0 ? Loc.T("Git.UpToDate")
@@ -194,7 +196,7 @@ public sealed class GitPanel : DockPanel
             if (r is null) return new TextBlock();
             var letter = new TextBlock { Text = r.Letter, FontWeight = FontWeight.SemiBold, Width = 16, FontSize = 12 }.Res(TextBlock.ForegroundProperty, r.BrushKey);
             var name = new TextBlock { Text = r.Name, FontSize = 12, Margin = new Thickness(0, 0, 6, 0) };
-            var folder = new TextBlock { Text = r.Folder, FontSize = 11, TextTrimming = Trimming.Leading, VerticalAlignment = VerticalAlignment.Center }
+            var folder = new PathTextBlock { FullPath = r.Folder, FontSize = 11, VerticalAlignment = VerticalAlignment.Center }
                 .Res(TextBlock.ForegroundProperty, "DimTextBrush");
             var row = new DockPanel { Background = Brushes.Transparent };
             SetDock(letter, Dock.Left);

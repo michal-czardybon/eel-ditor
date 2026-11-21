@@ -76,14 +76,17 @@ public class ParagraphWrapUiTests
     }
 
     [AvaloniaFact]
-    public void LongLinesNotice_SplitsSentences_AndShowsThatNoWordChanged()
+    public void SplittingLongLines_BySentence_ShowsThatNoWordChanged()
     {
         string para = string.Join(' ', Enumerable.Range(1, 150).Select(i => $"Zdanie numer {i}."));
         var (w, doc) = Open("long.md", "# T\n\n" + para + "\n", WrapMode.OneLine);
-        Assert.True(w.InfoBar.IsVisible);
-        var split = w.InfoBarButtons.Children.OfType<Button>().First(b => (string?)b.Content == Loc.T("Info.WrapSentences"));
-        split.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Assert.False(w.InfoBar.IsVisible); // long lines are no reason for a warning
+        Assert.Equal(Loc.T("Wrap.ShortOneLine"), w.FileConventionShown.Text);
+        Assert.False(w.FileConventionShown.Warning);         // the same as the setting
+        w.RunCommand("wrap.splitSentences");
         Assert.Equal(152, doc.Document.LineCount - 1);
+        Assert.Equal(Loc.T("Wrap.ShortSentences"), w.FileConventionShown.Text);
+        Assert.True(w.FileConventionShown.Warning);          // now it differs from the setting (one line)
         Assert.Contains("Zdanie numer 1.\nZdanie numer 2.\n", doc.Document.Text);
 
         // The notice offers the word diff, which shows that only line breaks changed.
@@ -94,6 +97,78 @@ public class ParagraphWrapUiTests
         Assert.True(w.CurrentDiffView!.WordMode);
         Assert.Empty(w.CurrentDiffView.WordDiffResult!.Spans);
         w.CloseDiff();
+    }
+
+    private static void Pump(int ms)
+    {
+        var until = DateTime.UtcNow.AddMilliseconds(ms);
+        while (DateTime.UtcNow < until) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(20); }
+    }
+
+    [AvaloniaFact]
+    public void TheSplitNotice_GoesWhenTheSplitIsUndone_OrTheTextChanges()
+    {
+        string para = string.Join(' ', Enumerable.Range(1, 150).Select(i => $"Zdanie numer {i}."));
+        var (w, doc) = Open("long.md", "# T\n\n" + para + "\n", WrapMode.OneLine);
+        w.RunCommand("wrap.splitSentences");
+        Assert.True(w.InfoBar.IsVisible);
+        doc.Document.UndoStack.Undo();
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(w.InfoBar.IsVisible);   // "Split … long lines" is about a text that is gone
+
+        w.RunCommand("wrap.splitSentences");
+        Assert.True(w.InfoBar.IsVisible);
+        doc.Document.Insert(0, "x");
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(w.InfoBar.IsVisible);
+    }
+
+    [AvaloniaFact]
+    public void ConvertingBackToOneLinePerParagraph_AndNothingToDo()
+    {
+        string para = string.Join(' ', Enumerable.Range(1, 30).Select(i => $"Zdanie numer {i}."));
+        string original = "# T\n\n" + para + "\n";
+        var (w, doc) = Open("j.md", original, WrapMode.OneLine);
+        w.RunCommand("wrap.splitSentences");
+        Assert.NotEqual(original, doc.Document.Text);
+        w.RunCommand("wrap.joinLines");
+        Assert.Equal(original, doc.Document.Text);                 // back to one line per paragraph
+        Assert.Contains(Loc.T("Info.Joined", 30, 1), w.InfoBarText.Text);
+
+        // Again: nothing to convert — no change and no "joined 0 lines" notice.
+        w.RunCommand("wrap.joinLines");
+        Assert.Equal(original, doc.Document.Text);
+        Assert.Contains(Loc.T("Info.Joined", 30, 1), w.InfoBarText.Text);  // the earlier notice, still true
+        doc.Document.UndoStack.Undo();
+        Dispatcher.UIThread.RunJobs();
+        w.RunCommand("wrap.splitSentences");
+        w.RunCommand("wrap.splitSentences");
+        Assert.DoesNotContain(" 0 ", w.InfoBarText.Text);
+        Assert.Equal(Loc.T("Info.NothingToConvert"), w.StatusMessage.Text);
+    }
+
+    [AvaloniaFact]
+    public void UndoingAnEolConversion_BringsBackTheMixedEndings()
+    {
+        var (w, doc) = Open("m.txt", "a\r\nb\nc\r\n", WrapMode.OneLine);
+        Assert.True(w.InfoBar.IsVisible);                     // mixed line endings
+        w.RunCommand("edit.eolLf");
+        Pump(800);
+        Assert.False(w.InfoBar.IsVisible);
+        Assert.Equal(EolKind.Lf, doc.Eol);
+        doc.Document.UndoStack.Undo();
+        Pump(800);
+        Assert.True(doc.EolMixed, doc.Document.Text.Replace("\r", "<CR>").Replace("\n", "<LF>") + " eol=" + doc.Eol);
+        Assert.Equal(EolKind.CrLf, doc.Eol);
+        Assert.True(w.InfoBar.IsVisible);
+
+        // "Leave as is": the bar stays hidden while editing, the status bar still says Mixed.
+        var leave = w.InfoBarButtons.Children.OfType<Button>().First(b => (string?)b.Content == Loc.T("Info.Leave"));
+        leave.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        doc.Document.Insert(0, "x");
+        Pump(800);
+        Assert.False(w.InfoBar.IsVisible);
+        Assert.StartsWith(Loc.T("Status.Mixed"), (string?)w.StatusEol.Content);
     }
 
     [AvaloniaFact]

@@ -64,6 +64,10 @@ public partial class MainWindow
 
     private bool InTable => _markdown is not null && MarkdownCommands.TableAtCaret(Editor, _markdown) is not null;
 
+    /// <summary>The heading level of the caret's line (0: not a heading).</summary>
+    private int HeadingLevelAtCaret =>
+        _markdown?.RenderFor(Editor.Document.GetLineByOffset(Math.Min(Editor.CaretOffset, Editor.Document.TextLength))) is { Kind: MdLineKind.Heading } r ? r.HeadingLevel : 0;
+
     private void Add(string id, string labelKey, Action execute, string[]? gestures = null, Func<bool>? canExecute = null, Func<bool>? isChecked = null, string? tooltipKey = null)
     {
         var cmd = new AppCommand
@@ -91,6 +95,12 @@ public partial class MainWindow
     /// <summary>Copies the selection; in Markdown with its styles closed (no lone markers in the clipboard).</summary>
     private async Task CopyAsync()
     {
+        // Text selected in a table drawn as a grid: the shown text.
+        if (_markdown?.GridSelection.Text is { } shown && Clipboard is { } board)
+        {
+            await board.SetTextAsync(shown);
+            return;
+        }
         if (_markdown is not null && MarkdownCommands.BalancedSelectionText(Editor, _markdown) is { } text && Clipboard is { } clipboard)
             await clipboard.SetTextAsync(text);
         else Editor.Copy();
@@ -128,14 +138,16 @@ public partial class MainWindow
         Add("md.italic", "Menu.Md.Italic", () => MdStyleToggle("*", MdStyle.Italic), ["Ctrl+I"], () => InMarkdown);
         Add("md.strike", "Menu.Md.Strike", () => MdStyleToggle("~~", MdStyle.Strike), ["Ctrl+Shift+X"], () => InMarkdown);
         Add("md.code", "Menu.Md.Code", () => MdStyleToggle("`", MdStyle.Code), ["Ctrl+OemTilde"], () => InMarkdown);
-        Add("md.highlight", "Menu.Md.Highlight", () => MdStyleToggle("==", MdStyle.Highlight), null, () => InMarkdown);
+        Add("md.highlight", "Menu.Md.Highlight", () => MdStyleToggle("==", MdStyle.Highlight), null, () => InMarkdown, tooltipKey: "Menu.Md.HighlightTip");
+        Add("md.sub", "Menu.Md.Subscript", () => MdStyleToggle("~", MdStyle.Subscript), null, () => InMarkdown, tooltipKey: "Menu.Md.SubscriptTip");
+        Add("md.sup", "Menu.Md.Superscript", () => MdStyleToggle("^", MdStyle.Superscript), null, () => InMarkdown, tooltipKey: "Menu.Md.SuperscriptTip");
         Add("md.task", "Menu.Md.Task", () => { if (_markdown is not null) MarkdownCommands.ToggleTask(Editor, _markdown); }, null, () => InMarkdown, tooltipKey: "Menu.Md.TaskTip");
         for (int level = 1; level <= 6; level++)
         {
             int l = level;
-            Add($"md.h{l}", $"Menu.Md.H{l}", () => MarkdownCommands.SetHeading(Editor, l), [$"Ctrl+D{l}"], () => InMarkdown);
+            Add($"md.h{l}", $"Menu.Md.H{l}", () => MarkdownCommands.SetHeading(Editor, l), [$"Ctrl+D{l}"], () => InMarkdown, () => HeadingLevelAtCaret == l);
         }
-        Add("md.h0", "Menu.Md.H0", () => MarkdownCommands.SetHeading(Editor, 0), null, () => InMarkdown);
+        Add("md.h0", "Menu.Md.H0", () => MarkdownCommands.SetHeading(Editor, 0), null, () => InMarkdown, () => InMarkdown && HeadingLevelAtCaret == 0);
         Add("md.raw", "Menu.Md.Raw", ToggleMarkdownRaw, ["Ctrl+Shift+M"], isChecked: () => _settings.MarkdownRaw, tooltipKey: "Menu.Md.RawTip");
         Add("md.image", "Menu.Md.Image", () => _ = InsertImageAsync(), ["Ctrl+Shift+I"], () => _active?.IsMarkdown == true && !Editor.IsReadOnly, tooltipKey: "Menu.Md.ImageTip");
         Add("md.table.editCell", "Menu.Md.Table.EditCell", EditCellAtCaret, ["F2"], () => InTable && !Editor.IsReadOnly, tooltipKey: "Table.CellEditTip");
@@ -154,24 +166,32 @@ public partial class MainWindow
         Add("md.table.selRow", "Menu.Md.Table.SelectRow", () => SelectTablePart(column: false), ["Ctrl+Alt+Down"], () => InTable);
         Add("md.table.copyCol", "Menu.Md.Table.CopyColumn", () => _ = CopyTableColumnAsync(), null, () => InTable);
         Add("md.table.format", "Menu.Md.Table.Format", () => Table(TableCommand.FormatInSource), null, () => InTable);
+        // Lists (after the table commands: Ctrl+Enter in a table inserts a row).
+        Add("md.list.itemAbove", "Menu.Md.List.ItemAbove", () => { if (_markdown is not null) MarkdownCommands.InsertListItem(Editor, _markdown, after: false); }, ["Ctrl+Shift+Enter"],
+            () => _markdown is not null && !Editor.IsReadOnly && !InTable && MarkdownCommands.InList(Editor, _markdown));
+        Add("md.list.itemBelow", "Menu.Md.List.ItemBelow", () => { if (_markdown is not null) MarkdownCommands.InsertListItem(Editor, _markdown, after: true); }, ["Ctrl+Enter"],
+            () => _markdown is not null && !Editor.IsReadOnly && !InTable && MarkdownCommands.InList(Editor, _markdown), tooltipKey: "Menu.Md.List.Tip");
+        Add("md.clearFormat", "Menu.Md.ClearFormat", ClearFormatting, ["Ctrl+Space"], () => InMarkdown && !Editor.IsReadOnly, tooltipKey: "Menu.Md.ClearFormatTip");
 
         // File
         Add("file.new", "Menu.File.New", NewDocument, ["Ctrl+N"]);
         Add("file.open", "Menu.File.Open", () => _ = OpenFilesDialogAsync(), ["Ctrl+O"]);
-        Add("file.reload", "Menu.File.Reload", () => { if (_active is not null) _ = ReloadAsync(_active, null); }, null, () => _active?.FilePath is not null);
+        Add("file.reload", "Menu.File.Reload", () => { if (_active is not null) _ = ReloadAsync(_active, null); }, ["F5"], () => _active?.FilePath is not null);
         Add("file.save", "Menu.File.Save", () => { if (_active is not null) _ = SaveAsync(_active); }, ["Ctrl+S"]);
         Add("file.saveAs", "Menu.File.SaveAs", () => { if (_active is not null) _ = SaveAsync(_active, saveAs: true); }, ["F12", "Ctrl+Alt+S"]);
         Add("file.saveAll", "Menu.File.SaveAll", () => _ = SaveAllAsync(), ["Ctrl+Shift+S"]);
         Add("file.close", "Menu.File.Close", () => { if (_active is not null) _ = CloseDocumentAsync(_active); }, ["Ctrl+W", "Ctrl+F4"]);
         Add("file.closeAll", "Menu.File.CloseAll", () => _ = CloseManyAsync(_files.Documents), ["Ctrl+Shift+W"]);
         Add("file.closeOthers", "Menu.File.CloseOthers", () => _ = CloseManyAsync(_files.Documents.Where(d => !ReferenceEquals(d, _active))));
+        Add("file.exportPdf", "Export.Pdf", () => _ = ExportAsync(pdf: true), null, () => _active is not null);
+        Add("file.exportHtml", "Export.Html", () => _ = ExportAsync(pdf: false), null, () => _active is not null);
         Add("file.copyPath", "Menu.File.CopyPath", () => _ = CopyToClipboardAsync(_active?.FilePath), null, () => _active?.FilePath is not null);
         Add("file.reveal", "Menu.File.Reveal", () => RevealInFileManager(_active?.FilePath), null, () => _active?.FilePath is not null);
         Add("file.exit", "Menu.File.Exit", Close, ["Alt+F4"]);
 
         // Edit
-        Add("edit.undo", "Menu.Edit.Undo", () => Editor.Undo(), ["Ctrl+Z"]);
-        Add("edit.redo", "Menu.Edit.Redo", () => Editor.Redo(), ["Ctrl+Y", "Ctrl+Shift+Z"]);
+        Add("edit.undo", "Menu.Edit.Undo", () => { if (_diffView?.Undo() != true) Editor.Undo(); }, ["Ctrl+Z"]);
+        Add("edit.redo", "Menu.Edit.Redo", () => { if (_diffView?.Redo() != true) Editor.Redo(); }, ["Ctrl+Y", "Ctrl+Shift+Z"]);
         // Windows also uses Ctrl+Insert, Shift+Delete and Shift+Insert for copy, cut and paste.
         Add("edit.cut", "Menu.Edit.Cut", () => _ = CutAsync(), ["Ctrl+X", "Shift+Delete"]);
         Add("edit.copy", "Menu.Edit.Copy", () => _ = CopyAsync(), ["Ctrl+C", "Ctrl+Insert"]);
@@ -184,6 +204,14 @@ public partial class MainWindow
         Add("edit.comment", "Menu.Edit.ToggleComment", () => ToggleComment(null), ["Ctrl+Q", "Ctrl+OemQuestion"]);
         Add("edit.commentAdd", "Menu.Edit.Comment", () => ToggleComment(true), ["Ctrl+K, Ctrl+C"]);
         Add("edit.commentRemove", "Menu.Edit.Uncomment", () => ToggleComment(false), ["Ctrl+K, Ctrl+U"]);
+        // Highlight ↔ bold ↔ italic: only the markers of each span change.
+        foreach (var from in StyleConversion.Convertible)
+            foreach (var to in StyleConversion.Convertible)
+            {
+                if (from == to) continue;
+                var (f, t) = (from, to);
+                Add($"edit.convert.{f}{t}", $"Convert.{f}To{t}", () => ConvertStyle(f, t), null, () => InMarkdown && !Editor.IsReadOnly, tooltipKey: "Convert.Tip");
+            }
         Add("edit.upper", "Menu.Edit.Upper", () => ChangeCase(upper: true), ["Ctrl+Shift+U"]);
         Add("edit.lower", "Menu.Edit.Lower", () => ChangeCase(upper: false), ["Ctrl+U"]);
         Add("edit.trimTrailing", "Menu.Edit.TrimTrailing", TrimTrailingWhitespace);
@@ -199,8 +227,11 @@ public partial class MainWindow
             Add($"edit.toLat.{tr.Id}", $"Cyrillic.Lang.{tr.Id}", () => ConvertAlphabet(tr.ToLatin), null, () => _active is not null && !Editor.IsReadOnly, tooltipKey: $"Cyrillic.Tip.{tr.Id}");
         }
         Add("view.cyrNone", "Cyrillic.ViewNone", () => SetCyrillicView(null), null, () => _active is not null, isChecked: () => _active?.CyrillicView is null);
-        Add("view.cyrA", "Cyrillic.ViewA", () => SetCyrillicView(Core.Text.CyrillicVariant.A), null, () => _active is not null, isChecked: () => _active?.CyrillicView == Core.Text.CyrillicVariant.A);
-        Add("view.cyrB", "Cyrillic.ViewB", () => SetCyrillicView(Core.Text.CyrillicVariant.B), null, () => _active is not null, isChecked: () => _active?.CyrillicView == Core.Text.CyrillicVariant.B);
+        foreach (var cyr in CyrillicViews.Ids)
+        {
+            string id = cyr;
+            Add($"view.cyr.{id}", CyrillicViews.LabelKey(id), () => SetCyrillicView(id), null, () => _active is not null, isChecked: () => _active?.CyrillicView == id);
+        }
 
         // Search
         Add("search.find", "Menu.Search.Find", () => ShowFindBar(replace: false), ["Ctrl+F"]);
@@ -254,10 +285,17 @@ public partial class MainWindow
         // Word diff: switches an open comparison, or opens one (with HEAD in a repository, else with the file on disk).
         Add("diff.words", "Diff.WordMode", ToggleWordDiff, ["Ctrl+F7", "Ctrl+Alt+W"],
             () => _diffView is not null || _active?.FilePath is not null, isChecked: () => _diffView?.WordMode == true, tooltipKey: "Diff.WordModeTip");
-        Add("wrap.oneLine", "Wrap.OneLineItem", () => SetParagraphWrap(Core.Text.WrapMode.OneLine), null, null, () => _settings.ParagraphWrap == Core.Text.WrapMode.OneLine);
-        Add("wrap.80", "Wrap.Width80Item", () => SetParagraphWrap(Core.Text.WrapMode.Width80), null, null, () => _settings.ParagraphWrap == Core.Text.WrapMode.Width80);
-        Add("wrap.120", "Wrap.Width120Item", () => SetParagraphWrap(Core.Text.WrapMode.Width120), null, null, () => _settings.ParagraphWrap == Core.Text.WrapMode.Width120);
-        Add("wrap.sentences", "Wrap.SentencesItem", () => SetParagraphWrap(Core.Text.WrapMode.Sentences), null, null, () => _settings.ParagraphWrap == Core.Text.WrapMode.Sentences, tooltipKey: "Wrap.SentencesTip");
+        Add("wrap.oneLine", "Wrap.OptionOneLine", () => SetParagraphWrap(Core.Text.WrapMode.OneLine), null, null, () => _settings.ParagraphWrap == Core.Text.WrapMode.OneLine);
+        Add("wrap.80", "Wrap.Short80", () => SetParagraphWrap(Core.Text.WrapMode.Width80), null, null, () => _settings.ParagraphWrap == Core.Text.WrapMode.Width80);
+        Add("wrap.100", "Wrap.Short100", () => SetParagraphWrap(Core.Text.WrapMode.Width100), null, null, () => _settings.ParagraphWrap == Core.Text.WrapMode.Width100);
+        Add("wrap.120", "Wrap.Short120", () => SetParagraphWrap(Core.Text.WrapMode.Width120), null, null, () => _settings.ParagraphWrap == Core.Text.WrapMode.Width120);
+        Add("wrap.sentences", "Wrap.OptionSentences", () => SetParagraphWrap(Core.Text.WrapMode.Sentences), null, null, () => _settings.ParagraphWrap == Core.Text.WrapMode.Sentences, tooltipKey: "Wrap.SentencesTip");
+        // Splitting the long lines of the whole file (from the status bar's "In the file: …").
+        Add("wrap.joinLines", "Wrap.Join", () => { if (_active is not null) WrapLongLines(_active, Core.Text.WrapMode.OneLine); }, null, () => _active is not null && !Editor.IsReadOnly);
+        Add("wrap.split80", "Wrap.Split80", () => { if (_active is not null) WrapLongLines(_active, Core.Text.WrapMode.Width80); }, null, () => _active is not null && !Editor.IsReadOnly);
+        Add("wrap.split100", "Wrap.Split100", () => { if (_active is not null) WrapLongLines(_active, Core.Text.WrapMode.Width100); }, null, () => _active is not null && !Editor.IsReadOnly);
+        Add("wrap.split120", "Wrap.Split120", () => { if (_active is not null) WrapLongLines(_active, Core.Text.WrapMode.Width120); }, null, () => _active is not null && !Editor.IsReadOnly);
+        Add("wrap.splitSentences", "Wrap.SplitSentences", () => { if (_active is not null) WrapLongLines(_active, Core.Text.WrapMode.Sentences); }, null, () => _active is not null && !Editor.IsReadOnly);
         Add("wrap.reflow", "Wrap.Reflow", ReflowParagraphs, ["Alt+Q"], () => _active is not null && !Editor.IsReadOnly, tooltipKey: "Wrap.ReflowTip");
         Add("diff.revert", "Diff.RevertChange", () => _diffView?.CopyBlock(toRight: true), null, () => _diffView is { RightEditable: true, WordMode: false }, tooltipKey: "Diff.RevertChangeTip");
         // Whole-file operations work in the word view too; single blocks only in the side-by-side one.
@@ -351,6 +389,7 @@ public partial class MainWindow
         MainMenu.Items.Add(Sub("Menu.File",
             Item("file.new"), Item("file.open"), _recentMenu, Item("file.reload"), Sep(),
             Item("file.save"), Item("file.saveAs"), Item("file.saveAll"), Sep(),
+            Item("file.exportPdf"), Item("file.exportHtml"), Sep(),
             Item("file.close"), Item("file.closeOthers"), Item("file.closeAll"), Sep(),
             Item("file.copyPath"), Item("file.reveal"), Item("file.console"), Sep(),
             Item("file.exit")));
@@ -361,13 +400,14 @@ public partial class MainWindow
             Sub("Menu.Edit.Lines", Item("edit.duplicate"), Item("edit.deleteLine"), Item("edit.moveUp"), Item("edit.moveDown"), Item("edit.trimTrailing")),
             Sub("Menu.Edit.Comments", Item("edit.comment"), Item("edit.commentAdd"), Item("edit.commentRemove")),
             Sub("Menu.Edit.Case", Item("edit.upper"), Item("edit.lower")),
+            Sub("Convert.Menu", [.. StyleConversion.Convertible.SelectMany(f => StyleConversion.Convertible.Where(t => t != f).Select(t => (object)Item($"edit.convert.{f}{t}")))]),
             Sub("Menu.Edit.Indentation", Item("edit.indentToSpaces"), Item("edit.indentToTabs")),
             Sub("Menu.Edit.Eol", Item("edit.eolCrLf"), Item("edit.eolLf"), Item("edit.eolCr")),
-            Sub("Wrap.Menu", Item("wrap.oneLine"), Item("wrap.80"), Item("wrap.120"), Item("wrap.sentences"), Sep(), Item("wrap.reflow")),
+            Sub("Wrap.Menu", Item("wrap.oneLine"), Item("wrap.80"), Item("wrap.100"), Item("wrap.120"), Item("wrap.sentences"), Sep(), Item("wrap.reflow")),
             Sub("Cyrillic.Menu",
-                Sub("Cyrillic.ToCyrillicMenu", Item("edit.toCyr.ru"), Item("edit.toCyr.uk"), Item("edit.toCyr.sr"), Item("edit.toCyr.isv"), Sep(),
+                Sub("Cyrillic.ToCyrillicMenu", Item("edit.toCyr.ru"), Item("edit.toCyr.uk"), Item("edit.toCyr.sr"), Item("edit.toCyr.isv"),
                     Item("edit.toCyrillicA"), Item("edit.toCyrillicB")),
-                Sub("Cyrillic.ToLatinMenu", Item("edit.toLat.ru"), Item("edit.toLat.uk"), Item("edit.toLat.sr"), Item("edit.toLat.isv"), Sep(),
+                Sub("Cyrillic.ToLatinMenu", Item("edit.toLat.ru"), Item("edit.toLat.uk"), Item("edit.toLat.sr"), Item("edit.toLat.isv"),
                     Item("edit.toLatin"))),
             Sep(),
             Item("edit.columnHelp")));
@@ -391,8 +431,8 @@ public partial class MainWindow
         MainMenu.Items.Add(encodingMenu);
 
         MainMenu.Items.Add(Sub("Menu.Markdown",
-            Item("md.bold"), Item("md.italic"), Item("md.strike"), Item("md.code"), Item("md.highlight"), Sep(),
-            Item("md.task"), Item("md.image"), Sep(),
+            Item("md.bold"), Item("md.italic"), Item("md.strike"), Item("md.code"), Item("md.highlight"), Item("md.sub"), Item("md.sup"), Item("md.clearFormat"), Sep(),
+            Item("md.task"), Item("md.list.itemAbove"), Item("md.list.itemBelow"), Item("md.image"), Sep(),
             Sub("Menu.Md.Heading", Item("md.h1"), Item("md.h2"), Item("md.h3"), Item("md.h4"), Item("md.h5"), Item("md.h6"), Item("md.h0")),
             Sub("Menu.Md.Table",
                 Item("md.table.insert"), Item("md.table.editCell"), Sep(),
@@ -464,7 +504,9 @@ public partial class MainWindow
         foreach (var i in BuildEncodingItems(reopen: false)) menu.Items.Add(i);
         menu.Items.Add(new Separator());
         var view = new MenuItem { Header = Loc.T("Cyrillic.ViewMenu") };
-        foreach (var id in new[] { "view.cyrNone", "view.cyrA", "view.cyrB" }) view.Items.Add(Item(id, track: false));
+        view.Items.Add(Item("view.cyrNone", track: false));
+        view.Items.Add(new Separator());
+        foreach (var id in CyrillicViews.Ids) view.Items.Add(Item($"view.cyr.{id}", track: false));
         menu.Items.Add(view);
         menu.Items.Add(new Separator());
         var eol = new MenuItem { Header = Loc.T("Menu.Encoding.Eol") };
@@ -545,6 +587,7 @@ public partial class MainWindow
         Btn("file.open", "IconOpen", "IconAmberBrush");
         Btn("file.save", "IconSave", "IconBlueBrush");
         Btn("file.saveAll", "IconSaveAll", "IconBlueBrush");
+        Btn("file.reload", "IconReload", "IconTealBrush");
         Btn("file.close", "IconClose", "IconRedBrush");
         S();
         Btn("edit.cut", "IconCut");
@@ -560,6 +603,7 @@ public partial class MainWindow
         Toggle("view.wrap", "IconWrap");
         Toggle("view.allChars", "IconWhitespace");
         Toggle("md.raw", "IconMarkdown", "IconBlueBrush");
+        BuildParagraphTools(S);
         S();
         Btn("diff.head", "IconDiff", "IconGreenBrush");
         Toggle("diff.words", "IconWordDiff", "IconTealBrush");
@@ -615,6 +659,7 @@ public partial class MainWindow
             }
             bool hasPath = doc.FilePath is not null;
             menu.Items.Add(M("Menu.File.Save", () => _ = SaveAsync(doc)));
+            menu.Items.Add(M("Menu.File.Reload", () => _ = ReloadAsync(doc, null), hasPath));
             menu.Items.Add(M("Menu.File.Close", () => _ = CloseDocumentAsync(doc)));
             menu.Items.Add(M("Menu.File.CloseOthers", () => _ = CloseManyAsync(_files.Documents.Where(d => !ReferenceEquals(d, doc)))));
             menu.Items.Add(new Separator());

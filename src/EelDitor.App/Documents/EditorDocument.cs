@@ -128,13 +128,16 @@ public sealed partial class EditorDocument : ObservableObject
     public long LastActivated { get; set; }
 
     /// <summary>Shown in Cyrillic (display only, the file is unchanged); null = as written.</summary>
-    public Core.Text.CyrillicVariant? CyrillicView { get; set; }
+    public string? CyrillicView { get; set; }
 
     /// <summary>Long lines were just converted: the info bar offers to show the changes as a word diff.</summary>
     public string? ReflowNotice { get; set; }
 
-    /// <summary>The user dismissed the "very long lines" notice for this file.</summary>
-    public bool LongLinesDismissed { get; set; }
+    /// <summary>The text the notice is about: any later change (typing, Ctrl+Z) makes it stale, and it goes.</summary>
+    public AvaloniaEdit.Document.ITextSourceVersion? ReflowVersion { get; set; }
+
+    /// <summary>The user chose to leave the mixed line endings as they are (the bar is not shown again for them).</summary>
+    public bool EolMixedAccepted { get; set; }
 
     /// <summary>
     /// After edits that cancel out (typing and deleting, undoing by hand) the text can be identical to the file again

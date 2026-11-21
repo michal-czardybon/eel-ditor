@@ -384,6 +384,26 @@ public sealed class DiffView : Grid
         MoveCaret(editor, _leftActive ? b.OldStart : b.NewStart);
     }
 
+    /// <summary>The side Undo/Redo act on: the focused editable side, else the editable one.</summary>
+    private TextEditor? UndoTarget =>
+        _leftActive && LeftEditable ? _left : RightEditable ? _right : LeftEditable ? _left : null;
+
+    public bool Undo()
+    {
+        if (_closed || UndoTarget is not { } e || !e.CanUndo) return false;
+        e.Undo();
+        RecomputeNow();
+        return true;
+    }
+
+    public bool Redo()
+    {
+        if (_closed || UndoTarget is not { } e || !e.CanRedo) return false;
+        e.Redo();
+        RecomputeNow();
+        return true;
+    }
+
     /// <summary>Makes one side identical to the other (one undo step).</summary>
     public void CopyAll(bool toRight)
     {

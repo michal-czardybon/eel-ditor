@@ -33,4 +33,29 @@ public class OpenFilesTreeTests
         Assert.Equal(Path.Combine(root, "src", "Core"), model.Groups[0].Directory);
         Assert.Null(model.Groups[0].Parent);
     }
+
+    [Avalonia.Headless.XUnit.AvaloniaFact]
+    public void TheCloseButtonOfARow_ClosesThatFile()
+    {
+        string dir = TestDirs.New();
+        Directory.CreateDirectory(dir);
+        string a = Path.Combine(dir, "a.txt"), b = Path.Combine(dir, "b.txt");
+        File.WriteAllText(a, "a");
+        File.WriteAllText(b, "b");
+        Services.SettingsStore.UseDirectory(TestDirs.New());
+        var w = new Views.MainWindow(new Services.AppSettings(), [a, b]);
+        w.Show();
+        var until = DateTime.UtcNow.AddSeconds(30);
+        while (!w.StartupCompleted && DateTime.UtcNow < until) { Avalonia.Threading.Dispatcher.UIThread.RunJobs(); Thread.Sleep(10); }
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        var model = (OpenFilesModel)w.DataContext!;
+        var docA = model.Documents.Single(d => d.FilePath == a);
+        var close = Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(w.FilesTree).OfType<Avalonia.Controls.Button>()
+            .Single(x => x.Classes.Contains("rowClose") && ReferenceEquals(x.DataContext, docA));
+        close.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        Assert.DoesNotContain(docA, model.Documents);
+        Assert.Contains(model.Documents, d => d.FilePath == b);
+        w.Close();
+    }
 }

@@ -2,7 +2,8 @@ namespace EelDitor.Markdown;
 
 /// <summary>
 /// A pragmatic subset of CommonMark inline parsing: code spans, links, images, footnote references and
-/// emphasis (<c>**</c>, <c>__</c>, <c>*</c>, <c>_</c>, <c>~~</c>, <c>==</c>). Produces hidden marker ranges and styled ranges.
+/// emphasis (<c>**</c>, <c>__</c>, <c>*</c>, <c>_</c>, <c>~~</c>, <c>==</c>), sub/superscript (<c>~x~</c>, <c>^x^</c>) and the HTML tags
+/// <c>sub sup s del mark br</c>. Produces hidden marker ranges and styled ranges.
 /// </summary>
 public static class InlineParser
 {
@@ -37,6 +38,35 @@ public static class InlineParser
                     continue;
                 }
                 i += run;
+                continue;
+            }
+            if (c == '<' && BreakTagLength(line, i, end) is int tag and > 0)
+            {
+                into.Breaks.Add(new HiddenRange(i, tag));
+                opaque.Add((i, i + tag));
+                i += tag;
+                continue;
+            }
+            if (c == '<' && TryHtmlStyleTag(line, i, end, out int openLength, out int closeStart, out int closeLength, out var htmlStyle))
+            {
+                // <sub>, <sup>, <s>, <del>, <mark>: the tags are hidden, the content keeps parsing (emphasis inside).
+                into.Hidden.Add(new HiddenRange(i, openLength));
+                into.Hidden.Add(new HiddenRange(closeStart, closeLength));
+                into.Styles.Add(new StyledRange(i + openLength, closeStart, baseStyle | htmlStyle));
+                opaque.Add((i, i + openLength));
+                opaque.Add((closeStart, closeStart + closeLength));
+                i += openLength;
+                continue;
+            }
+            if (c is '~' or '^' && TryScript(line, i, start, end, c) is int scriptClose and > 0)
+            {
+                // Pandoc / markdown-it: H~2~O, x^2^. One marker on each side, no spaces inside.
+                into.Hidden.Add(new HiddenRange(i, 1));
+                into.Hidden.Add(new HiddenRange(scriptClose, 1));
+                into.Styles.Add(new StyledRange(i + 1, scriptClose, baseStyle | (c == '~' ? MdStyle.Subscript : MdStyle.Superscript)));
+                opaque.Add((i, i + 1));
+                opaque.Add((scriptClose, scriptClose + 1));
+                i = scriptClose + 1;
                 continue;
             }
             if (c == '!' && i + 1 < end && line[i + 1] == '['
@@ -89,6 +119,7 @@ public static class InlineParser
         }
 
         // Pass 2: emphasis, skipping opaque regions.
+        opaque.Sort();
         var stack = new List<Delim>();
         i = start;
         int oi = 0;
@@ -143,6 +174,57 @@ public static class InlineParser
         }
 
         into.Hidden.Sort((a, b) => a.Start.CompareTo(b.Start));
+    }
+
+    /// <summary>Length of a <c>&lt;br&gt;</c>, <c>&lt;br/&gt;</c> or <c>&lt;br /&gt;</c> tag (any case) at <paramref name="i"/>, or 0.</summary>
+    public static int BreakTagLength(string s, int i, int end)
+    {
+        if (i + 4 > end || s[i] != '<' || (s[i + 1] | 0x20) != 'b' || (s[i + 2] | 0x20) != 'r') return 0;
+        int j = i + 3;
+        while (j < end && s[j] == ' ') j++;
+        if (j < end && s[j] == '/') j++;
+        return j < end && s[j] == '>' ? j + 1 - i : 0;
+    }
+
+    private static readonly (string Name, MdStyle Style)[] HtmlStyleTags =
+        [("sub", MdStyle.Subscript), ("sup", MdStyle.Superscript), ("del", MdStyle.Strike), ("s", MdStyle.Strike), ("mark", MdStyle.Highlight)];
+
+    /// <summary><c>&lt;sub&gt;…&lt;/sub&gt;</c> and the like (no attributes, any case) starting at <paramref name="i"/>, closed on the same line.</summary>
+    public static bool TryHtmlStyleTag(string s, int i, int end, out int openLength, out int closeStart, out int closeLength, out MdStyle style)
+    {
+        openLength = closeStart = closeLength = 0;
+        style = MdStyle.None;
+        foreach (var (name, st) in HtmlStyleTags)
+        {
+            string open = "<" + name + ">", close = "</" + name + ">";
+            if (i + open.Length > end || string.Compare(s, i, open, 0, open.Length, StringComparison.OrdinalIgnoreCase) != 0) continue;
+            int from = i + open.Length;
+            int at = s.IndexOf(close, from, end - from, StringComparison.OrdinalIgnoreCase);
+            if (at <= from) return false;
+            openLength = open.Length;
+            closeStart = at;
+            closeLength = close.Length;
+            style = st;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// The closing marker of a subscript <c>~x~</c> or superscript <c>^x^</c> opened at <paramref name="i"/>, or -1:
+    /// single markers (<c>~~</c> is strikethrough), a non-empty content without spaces.
+    /// </summary>
+    private static int TryScript(string s, int i, int start, int end, char c)
+    {
+        if ((i > start && s[i - 1] == c) || i + 1 >= end || s[i + 1] == c || char.IsWhiteSpace(s[i + 1])) return -1;
+        for (int j = i + 1; j < end; j++)
+        {
+            char d = s[j];
+            if (d == '\\') { j++; continue; }
+            if (char.IsWhiteSpace(d)) return -1;
+            if (d == c) return j + 1 < end && s[j + 1] == c ? -1 : j;
+        }
+        return -1;
     }
 
     private static int CountRun(string s, int i, int end, char c)

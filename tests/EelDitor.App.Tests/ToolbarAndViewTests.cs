@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using EelDitor.App.Documents;
@@ -60,13 +61,14 @@ public class ToolbarAndViewTests
     }
 
     [AvaloniaFact]
-    public void VeryLongLines_ShowANotice_AndCanBeWrapped()
+    public void VeryLongLines_CanBeWrapped_FromTheStatusBar()
     {
         string paragraph = string.Join(' ', Enumerable.Repeat("słowo", 300));
         var (w, doc) = Open("long.md", "# Tytuł\n\n" + paragraph + "\n");
-        Assert.True(w.InfoBar.IsVisible);
-        var wrap = w.InfoBarButtons.Children.OfType<Button>().First(b => (string?)b.Content == Loc.T("Info.WrapTo", 80));
-        wrap.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Assert.False(w.InfoBar.IsVisible);
+        Assert.True(w.FileConventionButton!.IsVisible);
+        Assert.Equal(Loc.T("Status.Longest", 1799.ToString("N0")), w.StatusLongest.Text);
+        w.RunCommand("wrap.split80");
         Assert.All(doc.Document.Lines, l => Assert.True(l.Length <= 80));
         Assert.StartsWith("# Tytuł\n\nsłowo słowo", doc.Document.Text);
         Assert.Contains(Loc.T("Info.ShowWordDiff"), w.InfoBarButtons.Children.OfType<Button>().Select(b => (string?)b.Content)); // the result notice
@@ -131,6 +133,41 @@ public class ToolbarAndViewTests
         w.RunCommand("diff.revertAll");
         Assert.Equal("ala ma kota\nbez zmian\n", doc.Document.Text);
         Assert.Equal("ala ma kota\nbez zmian\n", view.WordsEditor.Document.Text);
+        w.CloseDiff();
+    }
+
+    [AvaloniaFact]
+    public void Reload_IsOnTheToolbar_AndOnF5()
+    {
+        var (w, doc) = Open("r.txt", "stare");
+        Assert.NotNull(ToolButton(w, Loc.T("Menu.File.Reload")));
+        Assert.Contains("F5", w.CommandGestures()["file.reload"]);
+        File.WriteAllText(doc.FilePath!, "nowe");
+        w.RunCommand("file.reload");
+        Pump(300);
+        Assert.Equal("nowe", doc.Document.Text);
+        w.Close();
+    }
+
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RevertAll_IsUndoneByCtrlZ(bool words)
+    {
+        var (w, doc) = Open("u.txt", "ala ma psa\nbez zmian\n");
+        w.OpenDiff("HEAD", "ala ma kota\nbez zmian\n", "working", doc.Document, true, null);
+        Dispatcher.UIThread.RunJobs();
+        var view = w.CurrentDiffView!;
+        if (words) w.RunCommand("diff.words");
+        (words ? view.WordsEditor : view.RightEditor).TextArea.Focus();
+        Dispatcher.UIThread.RunJobs();
+        w.RunCommand("diff.revertAll");
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("ala ma kota\nbez zmian\n", doc.Document.Text);
+        w.KeyPress(Avalonia.Input.Key.Z, Avalonia.Input.RawInputModifiers.Control, Avalonia.Input.PhysicalKey.Z, "z");
+        w.KeyRelease(Avalonia.Input.Key.Z, Avalonia.Input.RawInputModifiers.Control, Avalonia.Input.PhysicalKey.Z, "z");
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("ala ma psa\nbez zmian\n", doc.Document.Text);
         w.CloseDiff();
     }
 

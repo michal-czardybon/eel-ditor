@@ -9,6 +9,7 @@ public enum WrapMode
     /// <summary>A paragraph is one line (the view can soft-wrap it).</summary>
     OneLine,
     Width80,
+    Width100,
     Width120,
     /// <summary>Semantic line breaks: every sentence starts on a new line (sembr.org).</summary>
     Sentences,
@@ -29,6 +30,7 @@ public static partial class ParagraphWrap
     public static int? Width(this WrapMode mode) => mode switch
     {
         WrapMode.Width80 => 80,
+        WrapMode.Width100 => 100,
         WrapMode.Width120 => 120,
         _ => null,
     };
@@ -252,6 +254,50 @@ public static partial class ParagraphWrap
     {
         if (index < 0 || index >= lines.Count || !IsProse(lines[index], markdown) || markdown && InFence(lines, index)) return null;
         if (markdown && index <= FrontMatterEnd(lines)) return null;
+        return ParagraphAround(lines, index, markdown);
+    }
+
+    /// <summary>
+    /// How the paragraphs of a text are broken into lines: the way most paragraphs follow (at least 60 % of those
+    /// that tell), <c>Mixed</c> when no way dominates, null when no paragraph tells (only short ones). A one-line
+    /// paragraph longer than 120 characters counts as one line per paragraph; a broken one as sentences when most of
+    /// its lines end a sentence, otherwise by its longest line (≤ 80, ≤ 100, ≤ 120).
+    /// </summary>
+    public static (WrapMode? Mode, bool Mixed) Detect(IReadOnlyList<string> lines, bool markdown)
+    {
+        var votes = new Dictionary<WrapMode, int>();
+        int frontMatter = markdown ? FrontMatterEnd(lines) : -1;
+        bool fence = false;
+        for (int i = frontMatter + 1; i < lines.Count; i++)
+        {
+            if (markdown && Fence().IsMatch(lines[i])) { fence = !fence; continue; }
+            if (fence || !IsProse(lines[i], markdown)) continue;
+            var (start, end) = ParagraphAround(lines, i, markdown);
+            start = Math.Max(start, i);
+            i = end;
+            var body = Enumerable.Range(start, end - start + 1).Select(k => lines[k].TrimEnd()).ToList();
+            WrapMode? vote;
+            if (body.Count == 1) vote = body[0].Length > 120 ? WrapMode.OneLine : null;
+            else
+            {
+                var broken = body.Take(body.Count - 1).ToList();
+                int sentences = broken.Count(l => EndsSentence(l, l.Length));
+                int longest = broken.Max(l => l.Length);
+                vote = sentences * 4 >= broken.Count * 3 ? WrapMode.Sentences
+                    : longest <= 80 ? WrapMode.Width80
+                    : longest <= 100 ? WrapMode.Width100
+                    : longest <= 120 ? WrapMode.Width120
+                    : WrapMode.OneLine;
+            }
+            if (vote is { } v) votes[v] = votes.GetValueOrDefault(v) + 1;
+        }
+        if (votes.Count == 0) return (null, false);
+        var top = votes.MaxBy(kv => kv.Value);
+        return top.Value * 5 >= votes.Values.Sum() * 3 ? (top.Key, false) : (null, true);
+    }
+
+    private static (int Start, int End) ParagraphAround(IReadOnlyList<string> lines, int index, bool markdown)
+    {
         bool StartsItem(string l) => markdown && Prefix().Match(l).Groups["marker"].Success;
         bool HardBreak(string l) => markdown && (l.EndsWith("  ", StringComparison.Ordinal) || l.EndsWith('\\'));
         int start = index;
@@ -304,7 +350,7 @@ public static partial class ParagraphWrap
                 result.Add(prefix + text[pos..]);
                 break;
             }
-            case WrapMode.Width80 or WrapMode.Width120:
+            case WrapMode.Width80 or WrapMode.Width100 or WrapMode.Width120:
                 result.AddRange(WrapWords(text, first, next, mode.Width()!.Value, markdown));
                 break;
             default:
@@ -387,6 +433,49 @@ public static partial class ParagraphWrap
             sb.Append(line).Append(lineBreak);
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// The opposite of <see cref="SplitLongLines"/>: every prose paragraph broken over several lines becomes one line
+    /// (list items and quotes keep their prefix; hard breaks, headings, tables, code and front matter stay). Only the
+    /// line breaks change, never a word. Returns the text and the number of paragraphs joined.
+    /// </summary>
+    public static (string Text, int Joined) JoinParagraphs(string text, bool markdown)
+    {
+        var lines = new List<string>();
+        var breaks = new List<string>();
+        int pos = 0;
+        while (pos < text.Length)
+        {
+            int end = pos;
+            while (end < text.Length && text[end] != '\n' && text[end] != '\r') end++;
+            int brk = end < text.Length ? (text[end] == '\r' && end + 1 < text.Length && text[end + 1] == '\n' ? 2 : 1) : 0;
+            lines.Add(text[pos..end]);
+            breaks.Add(text.Substring(end, brk));
+            pos = end + brk;
+        }
+        int frontMatter = markdown ? FrontMatterEnd(lines) : -1;
+        var sb = new StringBuilder(text.Length);
+        bool inFence = false;
+        int joined = 0;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (i <= frontMatter) { sb.Append(lines[i]).Append(breaks[i]); continue; }
+            if (markdown && Fence().IsMatch(lines[i])) inFence = !inFence;
+            else if (!inFence && IsProse(lines[i], markdown))
+            {
+                var (_, last) = ParagraphAround(lines, i, markdown);
+                if (last > i)
+                {
+                    sb.Append(Reflow(lines, i, last, WrapMode.OneLine, markdown)[0]).Append(breaks[last]);
+                    joined++;
+                    i = last;
+                    continue;
+                }
+            }
+            sb.Append(lines[i]).Append(breaks[i]);
+        }
+        return (sb.ToString(), joined);
     }
 
     /// <summary>The first lines of a text (enough for the front matter) without splitting all of it.</summary>
