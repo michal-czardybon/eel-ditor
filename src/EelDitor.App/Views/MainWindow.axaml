@@ -1,0 +1,159 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ae="https://github.com/avaloniaui/avaloniaedit"
+        xmlns:doc="using:EelDitor.App.Documents"
+        xmlns:loc="using:EelDitor.App.Services"
+        xmlns:views="using:EelDitor.App.Views"
+        x:Class="EelDitor.App.Views.MainWindow"
+        x:DataType="doc:OpenFilesModel"
+        Title="Eel-ditor"
+        Icon="avares://EelDitor/Assets/app.ico"
+        Width="1280" Height="820"
+        MinWidth="480" MinHeight="300"
+        Background="{DynamicResource ChromeBrush}"
+        DragDrop.AllowDrop="True">
+  <DockPanel>
+    <Menu x:Name="MainMenu" DockPanel.Dock="Top" Background="{DynamicResource ChromeBrush}" />
+
+    <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,0,0,1" Padding="4,2">
+      <StackPanel x:Name="Toolbar" Orientation="Horizontal" />
+    </Border>
+
+    <!-- Status bar -->
+    <Border DockPanel.Dock="Bottom" Height="24" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,1,0,0"
+            Background="{DynamicResource ChromeBrush}">
+      <Grid ColumnDefinitions="*,Auto">
+        <DockPanel LastChildFill="True" ClipToBounds="True">
+          <Button x:Name="StatusType" Classes="status" DockPanel.Dock="Left" />
+          <Border Classes="statusSep" DockPanel.Dock="Left" />
+          <Button x:Name="StatusMdView" Classes="status" IsVisible="False" DockPanel.Dock="Left" />
+          <Border x:Name="StatusMdSep" Classes="statusSep" IsVisible="False" DockPanel.Dock="Left" />
+          <TextBlock x:Name="StatusLength" Classes="status" DockPanel.Dock="Left" />
+          <Border Classes="statusSep" DockPanel.Dock="Left" />
+          <TextBlock x:Name="StatusMessage" Classes="status" Foreground="{DynamicResource DimTextBrush}" TextTrimming="CharacterEllipsis" />
+        </DockPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal">
+          <TextBlock x:Name="StatusPosition" Classes="status" />
+          <Border Classes="statusSep" />
+          <Button x:Name="StatusWrap" Classes="status" />
+          <Border x:Name="StatusWrapSep" Classes="statusSep" />
+          <Button x:Name="StatusEol" Classes="status" />
+          <Border Classes="statusSep" />
+          <Button x:Name="StatusEncoding" Classes="status" />
+          <Border Classes="statusSep" />
+          <Button x:Name="StatusIndent" Classes="status" />
+          <Border Classes="statusSep" />
+          <TextBlock x:Name="StatusInsert" Classes="status" Width="32" TextAlignment="Center" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Comparison: the current line of both sides, across the whole window width. -->
+    <Border x:Name="DiffLineHost" DockPanel.Dock="Bottom" IsVisible="False" Background="{DynamicResource EditorBrush}" />
+
+    <Grid x:Name="MainGrid" ColumnDefinitions="260,4,*">
+      <!-- Sidebar: open files (grouped by directory) with the document map, and the git changes tab -->
+      <TabControl x:Name="SideTabs" Classes="side" Background="{DynamicResource PanelBrush}" Padding="0">
+        <TabItem Header="{loc:T Side.Files}" x:Name="FilesTab">
+          <Grid x:Name="FilesTabGrid" RowDefinitions="Auto,*">
+            <Border Padding="6,6,6,4">
+              <TextBox x:Name="FilterBox" Watermark="{loc:T Panel.Filter}" Text="{Binding Filter}" FontSize="12" />
+            </Border>
+            <TreeView Grid.Row="1" x:Name="FilesTree" ItemsSource="{Binding Groups}" Background="Transparent"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+              <TreeView.DataTemplates>
+                <TreeDataTemplate DataType="doc:FileGroup" ItemsSource="{Binding Items}">
+                  <Grid ColumnDefinitions="Auto,*,Auto" Background="Transparent">
+                    <ToolTip.Tip>
+                      <TextBlock Text="{Binding Tooltip}" TextWrapping="NoWrap" />
+                    </ToolTip.Tip>
+                    <TextBlock Text="⎇" FontSize="12" Margin="0,0,4,0" IsVisible="{Binding IsRepository}"
+                               Foreground="{DynamicResource AccentTextBrush}" VerticalAlignment="Center" />
+                    <views:PathTextBlock Grid.Column="1" FullPath="{Binding Display}" FontSize="12" Foreground="{DynamicResource DimTextBrush}"
+                                         VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="{Binding Badge}" FontSize="11" Margin="6,0,4,0"
+                               Foreground="{DynamicResource DimTextBrush}" VerticalAlignment="Center"
+                               ToolTip.Tip="{Binding BadgeTooltip}" />
+                  </Grid>
+                </TreeDataTemplate>
+                <DataTemplate DataType="doc:EditorDocument">
+                  <Grid ColumnDefinitions="*,Auto" Background="Transparent">
+                    <ToolTip.Tip>
+                      <TextBlock Text="{Binding Tooltip}" TextWrapping="NoWrap" />
+                    </ToolTip.Tip>
+                    <TextBlock Text="{Binding Title}" FontSize="13" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                               Classes.active="{Binding IsActive}"
+                               Classes.gitModified="{Binding GitModified}" Classes.gitAdded="{Binding GitAdded}"
+                               Classes.gitDeleted="{Binding GitDeleted}" Classes.gitConflict="{Binding GitConflict}" />
+                    <TextBlock Grid.Column="1" Text="{Binding GitBadge}" FontSize="11" FontWeight="SemiBold" Margin="6,0,6,0"
+                               VerticalAlignment="Center"
+                               Classes.gitModified="{Binding GitModified}" Classes.gitAdded="{Binding GitAdded}"
+                               Classes.gitDeleted="{Binding GitDeleted}" Classes.gitConflict="{Binding GitConflict}" />
+                  </Grid>
+                </DataTemplate>
+              </TreeView.DataTemplates>
+            </TreeView>
+          </Grid>
+        </TabItem>
+        <TabItem Header="{loc:T Side.Git}" x:Name="GitTab">
+          <Border x:Name="GitHost" />
+        </TabItem>
+        <TabItem Header="{loc:T Side.Map}" x:Name="MapTab">
+          <Border x:Name="MapHost" />
+        </TabItem>
+      </TabControl>
+
+      <GridSplitter Grid.Column="1" Background="{DynamicResource BorderSubtleBrush}" ResizeDirection="Columns" />
+
+      <Grid Grid.Column="2" x:Name="EditorGrid" RowDefinitions="Auto,*,Auto,0">
+        <StackPanel Grid.Row="0">
+          <!-- Current file: name, folder, close -->
+          <Border x:Name="DocHeader" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,0,0,1">
+            <DockPanel Height="26">
+              <Button x:Name="DocClose" DockPanel.Dock="Right" Content="✕" Padding="10,0" Background="Transparent"
+                      VerticalAlignment="Stretch" ToolTip.Tip="{loc:T Menu.File.Close}" />
+              <TextBlock x:Name="DocHeaderName" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Margin="10,0,8,0" />
+              <views:PathTextBlock x:Name="DocHeaderPath" FontSize="11" VerticalAlignment="Center" Foreground="{DynamicResource DimTextBrush}" />
+            </DockPanel>
+          </Border>
+          <!-- Notification bar: mixed EOL, file changed on disk, encoding problems -->
+          <Border x:Name="InfoBar" IsVisible="False" Background="{DynamicResource WarningBarBrush}" Padding="10,5">
+            <DockPanel>
+              <StackPanel x:Name="InfoBarButtons" DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" />
+              <TextBlock x:Name="InfoBarText" Foreground="{DynamicResource WarningTextBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
+            </DockPanel>
+          </Border>
+          <!-- Merge conflicts in the current file -->
+          <Border x:Name="ConflictBar" IsVisible="False" Background="{DynamicResource WarningBarBrush}" Padding="10,5"
+                  BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,1,0,0">
+            <DockPanel>
+              <WrapPanel x:Name="ConflictBarButtons" DockPanel.Dock="Right" Orientation="Horizontal" />
+              <TextBlock x:Name="ConflictBarText" Foreground="{DynamicResource WarningTextBrush}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0" />
+            </DockPanel>
+          </Border>
+        </StackPanel>
+
+        <Panel Grid.Row="1" x:Name="EditorHost" Background="{DynamicResource EditorBrush}">
+          <ae:TextEditor x:Name="Editor"
+                         ShowLineNumbers="True"
+                         HorizontalScrollBarVisibility="Auto"
+                         VerticalScrollBarVisibility="Visible"
+                         Background="{DynamicResource EditorBrush}"
+                         Padding="4,0,0,0" />
+          <TextBlock x:Name="LoadingText" IsVisible="False" HorizontalAlignment="Center" VerticalAlignment="Center"
+                     Foreground="{DynamicResource DimTextBrush}" />
+        </Panel>
+
+        <GridSplitter Grid.Row="2" x:Name="ResultsSplitter" Height="4" IsVisible="False"
+                      Background="{DynamicResource BorderSubtleBrush}" ResizeDirection="Rows" />
+        <Border Grid.Row="3" x:Name="ResultsHost" IsVisible="False" Background="{DynamicResource PanelBrush}" />
+      </Grid>
+    </Grid>
+  </DockPanel>
+
+  <Window.Styles>
+    <Style Selector="TextBlock.active">
+      <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+    </Style>
+  </Window.Styles>
+</Window>

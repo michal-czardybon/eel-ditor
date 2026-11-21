@@ -5,8 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <Company>Carbon Editor</Company>
-    <Product>Carbon Editor</Product>
+    <Company>Eel-ditor</Company>
+    <Product>Eel-ditor</Product>
     <Version>0.1.0</Version>
   </PropertyGroup>
 </Project>
