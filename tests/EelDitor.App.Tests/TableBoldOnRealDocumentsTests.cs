@@ -6,24 +6,32 @@ using EelDitor.Markdown;
 
 namespace EelDitor.App.Tests;
 
-/// <summary>Ctrl+B on every row of the tables in real documents, selected or with the caret on it, never breaks the table.</summary>
+/// <summary>
+/// Ctrl+B on every row of the tables in real documents (the repository's own Markdown files: long rows, code spans,
+/// links, escaped pipes), selected or with the caret on it, never breaks the table.
+/// </summary>
 public class TableBoldOnRealDocumentsTests
 {
+    /// <summary>The repository's Markdown files, found from this source file (works with any build output folder).</summary>
+    private static string[] RepositoryDocuments([System.Runtime.CompilerServices.CallerFilePath] string here = "")
+    {
+        string root = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(here)!, "..", ".."));
+        return Directory.GetFiles(root, "*.md", SearchOption.AllDirectories)
+            .Where(f => !f.Split(Path.DirectorySeparatorChar).Any(part => part is "bin" or "obj" or ".git" or "publish" or "artifacts"))
+            .Order().ToArray();
+    }
+
     [AvaloniaFact]
     public void EveryRow_EverySelection()
     {
         var problems = new List<string>();
-        foreach (var file in new[]
+        int tables = 0;
+        foreach (var file in RepositoryDocuments())
         {
-            @"docs\DESIGN.md",
-            @"docs\DESIGN.md",
-            @"docs\DESIGN.md",
-        })
-        {
-            if (!File.Exists(file)) continue; // the documents of the repository
             string original = File.ReadAllText(file).Replace("\r\n", "\n");
             var lines = original.Split('\n');
             var md0 = MarkdownDocument.Parse(original);
+            tables += md0.Tables.Count();
             foreach (var table in md0.Tables)
                 foreach (var row in table.Rows)
                     foreach (int mode in new[] { 0, 1, 2, 3, 4, 5 })
@@ -57,6 +65,7 @@ public class TableBoldOnRealDocumentsTests
                         view.Dispose();
                     }
         }
+        Assert.True(tables >= 5, $"only {tables} tables found in the repository's documents");
         Assert.True(problems.Count == 0, problems.Count + " problems:\n" + string.Join("\n", problems.Take(8)));
     }
 }
