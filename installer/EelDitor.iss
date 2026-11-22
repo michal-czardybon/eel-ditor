@@ -1,4 +1,4 @@
-; Inno Setup script for Eel-ditor.
+﻿; Inno Setup script for Eel-ditor.
 ; Build with build-installer.ps1 (publishes the app, then runs ISCC), or: ISCC installer\EelDitor.iss
 ; after `dotnet publish` into publish\win-x64.
 
