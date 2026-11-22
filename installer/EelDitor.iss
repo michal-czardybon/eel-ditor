@@ -35,6 +35,12 @@ SolidCompression=yes
 WizardStyle=modern
 ChangesAssociations=yes
 CloseApplications=yes
+#ifdef SIGN
+; build-installer.ps1 passes /DSIGN and the "eelsign" tool (/Seelsign=…): Inno Setup signs the uninstaller and the
+; setup program with it. The packed EelDitor.exe is signed by the script before compiling.
+SignTool=eelsign
+SignedUninstaller=yes
+#endif
 
 [Languages]
 Name: "polish"; MessagesFile: "compiler:Languages\Polish.isl"

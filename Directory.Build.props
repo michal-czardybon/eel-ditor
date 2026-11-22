@@ -8,5 +8,12 @@
     <Company>Eel-ditor</Company>
     <Product>Eel-ditor</Product>
     <Version>0.1.0</Version>
+    <!-- Build output next to src, not inside each project: bin\<Project>\Debug\net10.0, obj\<Project>.
+         (Not UseArtifactsOutput with the repository as ArtifactsPath: the SDK then excludes the whole tree from
+         compilation.) The artifacts-path option of dotnet build/test still redirects everything elsewhere. -->
+    <BaseOutputPath Condition="'$(ArtifactsPath)' == ''">$(MSBuildThisFileDirectory)bin\$(MSBuildProjectName)\</BaseOutputPath>
+    <BaseIntermediateOutputPath Condition="'$(ArtifactsPath)' == ''">$(MSBuildThisFileDirectory)obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <!-- Leftovers of the old per-project bin/obj folders must never be compiled or copied. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;obj/**</DefaultItemExcludes>
   </PropertyGroup>
 </Project>

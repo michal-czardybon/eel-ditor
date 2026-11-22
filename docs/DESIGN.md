@@ -54,6 +54,12 @@ always hold the `EelRegistryOptions` type, never plain `RegistryOptions`.
 Logic that can be tested without UI belongs in Core or Markdown. `MainWindow` is split into partial files by area
 (`MainWindow.Files.cs`, `.Diff.cs`, `.Git.cs`, `.Search.cs`, `.CellEditor.cs`, …).
 
+**Build output** goes to `bin/<Project>/` and `obj/<Project>/` next to `src`, not inside each project
+(`Directory.Build.props`, `BaseOutputPath`/`BaseIntermediateOutputPath`). **Why:** `src` holds only sources. Not the
+SDK's `UseArtifactsOutput` with the repository as `ArtifactsPath`: the SDK excludes everything under that path from
+compilation. The paths apply only when no artifacts path is given, so `dotnet test --artifacts-path <dir>` still keeps
+test builds away from the running app's folder.
+
 ---
 
 ## 3. Files, encodings, line endings

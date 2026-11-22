@@ -11,7 +11,8 @@ decision is made or changed, add it there with the reason.
 - Every bug fix gets a regression test.
 
 ## Build and test
-- The user usually has the app running from `src/EelDitor.App/bin/Debug`, which locks it. Never kill it; build tests
+- The user usually has the app running from `bin/EelDitor.App/Debug/net10.0` (output is in `bin/` and `obj/` next to `src`,
+  set in `Directory.Build.props`), which locks it. Never kill it; build tests
   into a separate artifacts folder:
   `dotnet test tests/EelDitor.App.Tests --artifacts-path <scratch>/testart` (same for Core and Markdown tests).
 - Headless tests: `using Avalonia.Headless;` for `KeyPress`/`MouseDown`; never `Close()` a window with a dirty
