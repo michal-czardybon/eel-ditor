@@ -392,6 +392,34 @@ public static class MarkdownCommands
         return ListEdit.ItemStart(lines, lines.Count - 1) >= 0;
     }
 
+    /// <summary>The caret is in an ordered list (one that <see cref="RenumberList"/> can number).</summary>
+    public static bool InOrderedList(TextEditor editor, MarkdownView view)
+    {
+        if (!InList(editor, view)) return false;
+        var doc = editor.Document;
+        var line = doc.GetLineByOffset(editor.CaretOffset);
+        var lines = new List<string>();
+        for (int n = Math.Max(1, line.LineNumber - 50); n <= line.LineNumber; n++) lines.Add(doc.GetText(doc.GetLineByNumber(n)));
+        int start = ListEdit.ItemStart(lines, lines.Count - 1);
+        return start >= 0 && ListEdit.Parse(lines[start]) is { Ordered: true };
+    }
+
+    /// <summary>Numbers the caret's ordered list 1…N, as one undo step; only the numbers change.</summary>
+    public static bool RenumberList(TextEditor editor, MarkdownView view)
+    {
+        if (!InList(editor, view)) return false;
+        var doc = editor.Document;
+        int index = doc.GetLineByOffset(editor.CaretOffset).LineNumber - 1;
+        if (ListEdit.RenumberList(AllLines(doc), index) is not { } changes) return false;
+        using (doc.RunUpdate())
+            foreach (var (i, text) in changes)
+            {
+                var l = doc.GetLineByNumber(i + 1);
+                ReplaceDifference(doc, l.Offset, doc.GetText(l), text);
+            }
+        return true;
+    }
+
     /// <summary>A new empty item before or after the caret's item; an ordered list is renumbered.</summary>
     public static bool InsertListItem(TextEditor editor, MarkdownView view, bool after)
     {

@@ -320,6 +320,9 @@ public partial class MainWindow : Window
             if (e.Property == AvaloniaEdit.Editing.TextArea.OverstrikeModeProperty) UpdateCaretStatus();
         };
         area.AddHandler(KeyDownEvent, OnEditorKeyDown, RoutingStrategies.Tunnel);
+        // Web addresses outside the Markdown view (plain text, code, raw mode): underlined, Ctrl+click opens them.
+        var plainLinks = new EelDitor.App.Editor.PlainLinks(Editor, () => _markdown is null, () => Palette.Accent);
+        plainLinks.LinkActivated += url => { if (_active is { } doc) _ = OpenLinkAsync(url, doc); };
         ApplyLineNumberFont(Editor);
         Editor.PropertyChanged += (_, e) =>
         {

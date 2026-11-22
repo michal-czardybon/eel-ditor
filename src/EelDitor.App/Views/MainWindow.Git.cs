@@ -302,7 +302,10 @@ public partial class MainWindow
                 menu.Items.Add(heading);
                 menu.Items.Add(new Separator());
                 if (MarkdownCommands.InList(Editor, _markdown!))
+                {
                     foreach (var id in new[] { "md.list.itemAbove", "md.list.itemBelow" }) menu.Items.Add(Item(id, track: false));
+                    if (MarkdownCommands.InOrderedList(Editor, _markdown!)) menu.Items.Add(Item("md.list.renumber", track: false));
+                }
                 foreach (var id in new[] { "md.task", "md.image", "md.table.insert" }) menu.Items.Add(Item(id, track: false));
             }
         };

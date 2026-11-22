@@ -305,6 +305,8 @@
   "Menu.Md.List.ItemAbove": "Wstaw element listy nad",
   "Menu.Md.List.ItemBelow": "Wstaw element listy pod",
   "Menu.Md.List.Tip": "Nowy element z tym samym znacznikiem; lista numerowana jest przenumerowywana. Enter w elemencie zaczyna następny, Shift+Enter nową linię w tym samym elemencie, Enter na pustym elemencie kończy listę.",
+  "Menu.Md.List.Renumber": "Przenumeruj punkty",
+  "Menu.Md.List.RenumberTip": "Numeruje punkty tej listy 1, 2, 3… bez dziur i powtórzeń; zmieniają się tylko numery.",
   "Menu.Md.Raw": "Widok zwykłego tekstu",
   "Menu.Md.RawTip": "Pokazuje Markdown jako zwykły tekst: ze wszystkimi znacznikami, bez formatowania.",
   "Menu.Md.Strike": "Przekreślenie",

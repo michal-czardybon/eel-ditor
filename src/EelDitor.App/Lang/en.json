@@ -305,6 +305,8 @@
   "Menu.Md.List.ItemAbove": "Insert list item above",
   "Menu.Md.List.ItemBelow": "Insert list item below",
   "Menu.Md.List.Tip": "A new item with the same marker; a numbered list is renumbered. Enter in an item starts the next one, Shift+Enter a new line inside the item, Enter on an empty item ends the list.",
+  "Menu.Md.List.Renumber": "Renumber items",
+  "Menu.Md.List.RenumberTip": "Numbers the items of this list 1, 2, 3… without gaps or repeats; only the numbers change.",
   "Menu.Md.Raw": "Plain text view",
   "Menu.Md.RawTip": "Shows Markdown as plain text: all markup visible, no formatting.",
   "Menu.Md.Strike": "Strikethrough",

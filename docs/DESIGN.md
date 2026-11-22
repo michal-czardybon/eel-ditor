@@ -89,6 +89,9 @@ Logic that can be tested without UI belongs in Core or Markdown. `MainWindow` is
 - The sidebar has tabs: Open files, Git, Map (document map). The first is named "Open files", not "Files", so it is
   not mistaken for a browser of the disk. Paths (also in the Git tab) are shortened by whole leading folders.
 - "Display as ›" in the file context menu replaces a global Language menu.
+- **The current file's header** (name and folder above the editor) is larger than the rest of the chrome (name 15 px,
+  folder 12.5 px, 34 px high): the open file is the reference point of the whole window, including the Git and Map
+  tabs, so it must stand out.
 
 ---
 
@@ -138,6 +141,18 @@ line inside the item indented to its text, Enter on an empty item ends the list.
 the menus) insert an item below / above. An ordered list is renumbered only when it is numbered in sequence; a list
 written as `1. 1. 1.` keeps its numbers (fewer changed lines). Wrapped list items cannot get a hanging indent: Avalonia's
 text formatter ignores paragraph indentation (verified; AvaloniaEdit's `WordWrapIndentation` has no effect), see §13.
+
+**Renumber items** (list menus, only in an ordered list) numbers the caret's list 1…N, keeping its delimiter and
+indentation; nested lists keep their numbers. It is an explicit command because it may change many lines, which
+editing never does by itself (see above).
+
+**Links.** Besides `[text](url)`, bare addresses (`https://…`, `http://…`, `www.…`, `mailto:…`, GFM autolink rules:
+trailing punctuation and an unbalanced `)` are not part of the address) and autolinks `<https://…>`, `<a@b.org>` are
+links: underlined in the accent colour, opaque to emphasis (`a_b_c` in a URL stays as written), opened by Ctrl+click
+(a plain click places the caret, as in Visual Studio). Outside the Markdown view (plain text, code, raw mode)
+`PlainLinks` underlines and opens bare addresses the same way. Only web and mail addresses go to the system; paths
+open in the editor; nothing else is executed. AvaloniaEdit's own hyperlinks stay off (they would conflict with
+hidden markup and open any URI scheme).
 
 **Horizontal rules** (`---`, `***`, `___`; not a setext underline, not YAML front matter) are drawn as a line across
 the whole view; Backspace or Delete anywhere on it removes the whole line.

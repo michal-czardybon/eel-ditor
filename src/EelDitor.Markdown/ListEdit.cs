@@ -174,6 +174,24 @@ public static partial class ListEdit
         return new Change(line + 1, prefix + rest, prefix.Length, changes.Where(c => c.Item2 != lines[c.Item1 - 1]).ToList());
     }
 
+    /// <summary>
+    /// The ordered list containing <paramref name="line"/> numbered 1…N (its own level only; nested lists keep their
+    /// numbers): the lines that change, as (index, new text). Null when the line is not in an ordered list.
+    /// </summary>
+    public static List<(int Line, string Text)>? RenumberList(IReadOnlyList<string> lines, int line)
+    {
+        int start = ItemStart(lines, line);
+        if (start < 0 || Parse(lines[start]) is not { Ordered: true }) return null;
+        var changes = new List<(int, string)>();
+        int n = 0;
+        foreach (int s in Siblings(lines, start))
+        {
+            string text = Renumber(lines[s], ++n);
+            if (text != lines[s]) changes.Add((s, text));
+        }
+        return changes;
+    }
+
     /// <summary>An item with nothing after its marker (Enter there ends the list).</summary>
     public static bool IsEmptyItem(string line) => Parse(line) is { } item && line[item.ContentStart..].Trim().Length == 0;
 

@@ -166,7 +166,11 @@ public sealed partial class MarkdownDocument
         return new MarkdownDocument(lines, tables);
     }
 
-    private static bool HasInlineCandidates(string line) => line.AsSpan().IndexOfAny("*_~`[=\\<^") >= 0;
+    private static bool HasInlineCandidates(string line) =>
+        line.AsSpan().IndexOfAny("*_~`[=\\<^") >= 0
+        // Bare web addresses (UrlFinder): "https://", "http://", "mailto:", "www."
+        || line.Contains("://", StringComparison.Ordinal) || line.Contains("mailto:", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("www.", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Line index of the definition <c>[^label]: …</c>, or -1.</summary>
     public int FootnoteDefinitionLine(string label)

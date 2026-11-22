@@ -10,9 +10,9 @@ An eel is a dark and ugly fish that can wrap its long body well, and always slip
 
 The reasons behind these principles and the decisions made along the way are in [docs/DESIGN.md](docs/DESIGN.md).
 
-1. Be a simple, plain text editor.
-2. But allow wrapping long lines and table content to fit the window width.
-3. And support semantic operations on lists and tables.
+1. Be a simple, plain text editor using monospace fonts and ASCII-art for tables.
+2. Allow wrapping long lines and table content to fit the window width.
+3. Support semantic operations on lists and tables.
 4. Do not pollute the diff (no table reformatting etc.).
 5. Allow keeping dozens of files open, and navigating them effectively through a side panel instead of tabs.
 6. Offer diff commands (line-based and word-based).
@@ -28,9 +28,19 @@ The reasons behind these principles and the decisions made along the way are in 
 
 ## Line-break conventions
 
-Eel prefers long lines (same as Claude), and word-by-word diff to compare them. This is a pure way to write paragraphs of natural text without thinking when to break, or how to reflow when some lines get longer or shorter after edits. However, when you open existing files these may follow other conventions. Eel can work with them too, and respects their choices. It auto-detects one of several conventions of line-breaks and informs you about what it sees on the toolbar. You can choose whether to make edits using the same convention, or another one. And whenever you want to enforce the currently chosen convention, select the text and press Alt+Q.
+Eel works well with long lines, and has the word-by-word diff to compare them. This is a pure way to write paragraphs of natural text without thinking when to break, or how to reflow when some lines get longer or shorter after edits. However, other modes are also possible. Eel can work with breaks after 80/100/120 columns or breaking after each sentence. When you open a file, the existing convention is auto-detected and the editor informs you about it on the toolbar. You can choose whether to make edits using the same convention, or another one. And whenever you want to enforce the currently chosen convention, select the text and press Alt+Q.
+
+Editing tables in the line wrapping mode may be a bit problematic. Thus, you need to first double click a cell to enter edit mode.
 
 ## Running
+
+Install it with `EelDitor-<version>-setup.exe` (see [Installer](#installer)), or run the self-contained executable directly; it needs no installation and no .NET runtime:
+
+```
+publish\win-x64\EelDitor.exe [files...]
+```
+
+From the sources (needs the .NET SDK):
 
 ```
 dotnet run --project src/EelDitor.App -- [files...]

@@ -187,6 +187,8 @@ public partial class MainWindow
             () => _markdown is not null && !Editor.IsReadOnly && !InTable && MarkdownCommands.InList(Editor, _markdown));
         Add("md.list.itemBelow", "Menu.Md.List.ItemBelow", () => { if (_markdown is not null) MarkdownCommands.InsertListItem(Editor, _markdown, after: true); }, ["Ctrl+Enter"],
             () => _markdown is not null && !Editor.IsReadOnly && !InTable && MarkdownCommands.InList(Editor, _markdown), tooltipKey: "Menu.Md.List.Tip");
+        Add("md.list.renumber", "Menu.Md.List.Renumber", () => { if (_markdown is not null) MarkdownCommands.RenumberList(Editor, _markdown); }, null,
+            () => _markdown is not null && !Editor.IsReadOnly && !InTable && MarkdownCommands.InOrderedList(Editor, _markdown), tooltipKey: "Menu.Md.List.RenumberTip");
         Add("md.clearFormat", "Menu.Md.ClearFormat", ClearFormatting, ["Ctrl+Space"], () => InMarkdown && !Editor.IsReadOnly, tooltipKey: "Menu.Md.ClearFormatTip");
 
         // File
@@ -451,7 +453,7 @@ public partial class MainWindow
         MainMenu.Items.Add(Sub("Menu.Markdown",
             Item("md.bold"), Item("md.italic"), Item("md.strike"), Item("md.code"), Item("md.highlight"), Item("md.sub"), Item("md.sup"), Item("md.clearFormat"), Sep(),
             Item("md.h0"), Item("md.h1"), Item("md.h2"), Item("md.h3"), Item("md.h4"), Item("md.h5"), Item("md.h6"), Sep(),
-            Item("md.task"), Item("md.list.itemAbove"), Item("md.list.itemBelow"), Item("md.image")));
+            Item("md.task"), Item("md.list.itemAbove"), Item("md.list.itemBelow"), Item("md.list.renumber"), Item("md.image")));
 
         MainMenu.Items.Add(Sub("Menu.Md.Table",
             Item("md.table.insert"), Item("md.table.editCell"), Sep(),

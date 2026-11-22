@@ -305,6 +305,8 @@
   "Menu.Md.List.ItemAbove": "Vstavi element spiska nad",
   "Menu.Md.List.ItemBelow": "Vstavi element spiska pod",
   "Menu.Md.List.Tip": "Novy element s tym samym znakom; numerovany spisok se pronumeruje. Enter v elementu počinaje slědujuči, Shift+Enter novu liniju v tom samom elementu, Enter na pustom elementu končaje spisok.",
+  "Menu.Md.List.Renumber": "Pronumeruj elementy",
+  "Menu.Md.List.RenumberTip": "Elementy spiska dostanut nomery 1, 2, 3… po redu; měnjajut se jedino nomery.",
   "Menu.Md.Raw": "Pogled obyčnogo teksta",
   "Menu.Md.RawTip": "Pokazuje Markdown kako obyčny tekst: so vsimi znakami, bez stilov.",
   "Menu.Md.Strike": "Prěčrknuty tekst",

@@ -115,6 +115,24 @@ public static class InlineParser
                 i = linkEnd;
                 continue;
             }
+            if (c == '<' && TryAutolink(line, i, end, out int autoEnd, out string? autoUrl))
+            {
+                // <https://example.org>, <name@example.org>: the angle brackets are hidden.
+                into.Hidden.Add(new HiddenRange(i, 1));
+                into.Hidden.Add(new HiddenRange(autoEnd - 1, 1));
+                into.Styles.Add(new StyledRange(i + 1, autoEnd - 1, baseStyle | MdStyle.Link, autoUrl));
+                opaque.Add((i, autoEnd));
+                i = autoEnd;
+                continue;
+            }
+            if (c is 'h' or 'H' or 'w' or 'W' or 'm' or 'M' && UrlFinder.At(line, i, end) is { } bare)
+            {
+                // A bare address (GFM autolink extension): shown as written, opaque to emphasis (a_b_c in a URL).
+                into.Styles.Add(new StyledRange(bare.Start, bare.End, baseStyle | MdStyle.Link, bare.Url));
+                opaque.Add((bare.Start, bare.End));
+                i = bare.End;
+                continue;
+            }
             i++;
         }
 
@@ -184,6 +202,32 @@ public static class InlineParser
         while (j < end && s[j] == ' ') j++;
         if (j < end && s[j] == '/') j++;
         return j < end && s[j] == '>' ? j + 1 - i : 0;
+    }
+
+    /// <summary>
+    /// A CommonMark autolink at <paramref name="i"/>: <c>&lt;scheme:…&gt;</c> (http, https, mailto) or
+    /// <c>&lt;name@host&gt;</c> (opened as mailto:), no spaces inside. <paramref name="linkEnd"/> is after the <c>&gt;</c>.
+    /// </summary>
+    public static bool TryAutolink(string s, int i, int end, out int linkEnd, out string? url)
+    {
+        linkEnd = -1;
+        url = null;
+        int close = -1;
+        for (int j = i + 1; j < end; j++)
+        {
+            char c = s[j];
+            if (c == '>') { close = j; break; }
+            if (char.IsWhiteSpace(c) || c == '<') return false;
+        }
+        if (close < i + 3) return false;
+        string body = s[(i + 1)..close];
+        string[] schemes = ["https://", "http://", "mailto:"];
+        if (schemes.Any(p => body.Length > p.Length && body.StartsWith(p, StringComparison.OrdinalIgnoreCase))) url = body;
+        else if (body.IndexOf('@') is int at and > 0 && at < body.Length - 1 && body[(at + 1)..].Contains('.') && body.IndexOf(':') < 0 && body.IndexOf('/') < 0)
+            url = "mailto:" + body;
+        else return false;
+        linkEnd = close + 1;
+        return true;
     }
 
     private static readonly (string Name, MdStyle Style)[] HtmlStyleTags =
