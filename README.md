@@ -71,6 +71,6 @@ dotnet test
 | `src/EelDitor.App` | Avalonia application: window, menus, file panel, Markdown rendering in the editor, diff |
 | `tests/*` | xUnit tests, including headless editor tests |
 
-UI texts are in `src/EelDitor.App/Lang/<code>.json`: Polish (`pl`), English (`en`) and Interslavic (`isv`, notes in `isv-notes.md`). A new language is a new file plus an entry in `Loc.Languages`; a test makes sure the keys and `{0}` placeholders match the Polish file. Missing keys take the English text, then the Polish one.
+UI texts are in `src/EelDitor.App/Lang/<code>.json`: Polish (`pl`), English (`en`) and Interslavic (`isv`, notes in `isv-notes.md`) and Interslavic in Cyrillic (`isv-Cyrl`, generated from `isv.json` by `tools/make_isv_cyrl.py`). A new language is a new file plus an entry in `Loc.Languages`; a test makes sure the keys and `{0}` placeholders match the Polish file. Missing keys take the English text, then the Polish one.
 
 Errors that did not stop the program are written to `%APPDATA%/Eel-ditor/errors.log`.

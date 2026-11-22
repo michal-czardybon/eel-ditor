@@ -218,7 +218,7 @@
   "Info.Reload": "Wczytaj ponownie",
   "Info.ReopenAs": "Otwórz jako…",
   "Info.ShowWordDiff": "Pokaż różnice słów",
-  "Info.Unify": "Ujednolić do {0}",
+  "Info.Unify": "Ujednolij do {0}",
   "Link.NotFound": "Nie znaleziono pliku z odnośnika: {0}",
   "Md.Cleared": "Usunięte formatowanie: {0}",
   "Md.ClearedSkipped": "Usunięte formatowanie: {0}; bez zmian: {1} (zmiana zmieniłaby wyświetlany tekst)",

@@ -38,4 +38,46 @@ public class LocalizationTests
             Assert.True(expected.SequenceEqual(actual), $"{code}: {key}");
         }
     }
+
+    [Fact]
+    public void Interslavic_HasNoKnownMistakes()
+    {
+        var isv = Read("isv");
+        Assert.Equal("Anuluj", isv["Button.Cancel"]);
+        Assert.Equal("Izsěči", isv["Menu.Edit.Cut"]);
+        Assert.Equal("Iznova pročitaj iz diska", isv["Menu.File.Reload"]);
+        foreach (var (key, text) in isv)
+        {
+            Assert.DoesNotContain("prěčrk", text);
+            Assert.DoesNotContain("Izrěži", text);
+            Assert.DoesNotContain("opir", text); // kopiruj / kopirovano
+            Assert.DoesNotContain(" s diska", text);
+            Assert.DoesNotContain("v vs", text);
+            Assert.DoesNotContain("odstranjenje togda", text);
+            // Menu and button labels are imperatives, not infinitives.
+            if ((key.StartsWith("Menu.") || key.StartsWith("Button.")) && !text.Contains('?'))
+                Assert.DoesNotMatch(@"^\p{Lu}\p{L}*(ati|iti|ěti|yti)", text);
+        }
+    }
+
+    [Fact]
+    public void Polish_ButtonsAreImperatives()
+    {
+        var pl = Read("pl");
+        Assert.Equal("Ujednolij do {0}", pl["Info.Unify"]);
+        foreach (var (key, text) in pl)
+            if ((key.StartsWith("Menu.") || key.StartsWith("Button.") || key.StartsWith("Info.")) && !text.Contains('?'))
+                Assert.DoesNotMatch(@"^\p{Lu}\p{L}*(ać|ić|yć|eć|uć)", text);
+    }
+
+    [Fact]
+    public void InterslavicCyrillic_KeepsTechnicalTermsInLatin()
+    {
+        var cyr = Read("isv-Cyrl");
+        Assert.Equal("Анулуј", cyr["Button.Cancel"]);
+        Assert.Contains("(git add)", cyr["Git.Add"]);
+        Assert.Contains("Ctrl+Z", cyr["Convert.Tip"]);
+        Assert.Contains("{0}", cyr["Find.Position"]);
+        Assert.DoesNotMatch("[a-zA-Z]", cyr["Menu.File.Open"]);
+    }
 }

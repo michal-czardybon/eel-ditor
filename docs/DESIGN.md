@@ -318,8 +318,14 @@ diff-friendly mode.
   the character is typed and no shortcut fires (`KeyMap.IsAltGrText`). Commands therefore have non-Ctrl+Alt shortcuts
   (Ctrl+Shift+…, F-keys); Ctrl+Alt remains only as an alias and for non-character keys (arrows, Backspace, Delete).
 - Shift+Insert / Ctrl+Insert work as paste/copy.
-- **All UI text goes through `Loc`** (`Lang/<code>.json`: `pl`, `en`, `isv`). Missing keys fall back to English, then
-  Polish. A test checks that keys and `{0}` placeholders match Polish. Interslavic notes are in `Lang/isv-notes.md`.
+- **All UI text goes through `Loc`** (`Lang/<code>.json`: `pl`, `en`, `isv`, `isv-Cyrl`). Missing keys fall back to English,
+  then Polish. A test checks that keys and `{0}` placeholders match Polish. Interslavic notes are in `Lang/isv-notes.md`.
+  `isv-Cyrl.json` is generated from `isv.json` (`py tools/make_isv_cyrl.py`; official Cyrillic alphabet, git terms, key
+  names and Markdown syntax stay Latin): edit `isv.json` only, then regenerate.
+  Interslavic UI rules (user's decisions): buttons and menu items are imperatives (*Anuluj*, *Kopiuj*, *Vstavi*),
+  never infinitives (infinitive only in yes/no questions); *Kopiuj* (not *kopiruj*); *Izsěči* for Cut; *iz diska*
+  (from the disk, not *s diska*); *vo vsih* before *vs-*; verbal nouns of the imperfective for ongoing actions
+  (*pisanje, vstavjanje, odstranjanje*); strikethrough is *izčrknuty* (a dictionary word; *prěčrknuty* does not exist).
   Labels are short; explanations (including Markdown syntax such as `==text==`) go into tooltips, never into the label.
   Buttons on info bars are a word or two ("Reload", "Hide"). Info bars are for things that need a decision (file
   changed on disk, mixed EOL, lossy decoding), not for styles the user may well want (long lines).

@@ -12,7 +12,7 @@ Checked with the isv-translator dictionary (`analyze` on every word). Words not 
 | zakladka | (&) | bookmark: pl *zakładka*, cs *záložka*, ru/uk *закладка* |
 | podpapka | (&) | pod- + papka |
 | formatuj (formatovati) | (&) | from *format* |
-| prěčrknuty | (&) | strikethrough: pl *przekreślony*, cs *přeškrtnutý*, ru *перечёркнутый* |
+| izčrknuty | | strikethrough: [3271] en *cross out*, pl *skreślić*; *prěčrknuty* is not a word |
 | sistemna | (&) | adjective from *sistema* |
 | tolsty tekst | (??) [[debely]] | bold: en *thick/fat*, pl *gruby, tłusty*; cf. ru *жирный*, cs *tučné* |
 | vratiti (Undo) | (?) | entry [13844]: en *undo*, pl *cofnąć (czynność)* |

@@ -20,6 +20,7 @@ public static class Loc
         ("pl", "Polski"),
         ("en", "English"),
         ("isv", "Medžuslovjansky"),
+        ("isv-Cyrl", "Меджусловјанскы"),
     ];
 
     /// <summary>Polish for a Polish system, English otherwise.</summary>
