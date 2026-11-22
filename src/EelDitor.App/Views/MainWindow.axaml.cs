@@ -75,7 +75,7 @@ public partial class MainWindow : Window
             if (e.Source is Button { Classes: var c, DataContext: EditorDocument doc } && c.Contains("rowClose"))
             {
                 e.Handled = true;
-                _ = CloseDocumentAsync(doc);
+                CloseByUser(doc);
             }
         });
         FilesTree.ContainerPrepared += OnTreeContainerPrepared;
@@ -257,6 +257,8 @@ public partial class MainWindow : Window
     private void UpdateDocumentHeader()
     {
         DocHeader.IsVisible = _active is not null;
+        // While comparing, the comparison has its own ✕ (Close diff); a second ✕ here would close the file instead.
+        DocClose.IsVisible = _diffView is null;
         if (_active is null) return;
         DocHeaderName.Text = (_active.IsDirty ? "● " : "") + _active.FileName;
         DocHeaderPath.FullPath = _active.DirectoryPath is { Length: > 0 } dir ? OpenFilesModel.HomeRelative(dir) : "";
@@ -323,7 +325,7 @@ public partial class MainWindow : Window
         {
             if (e.Property == AvaloniaEdit.TextEditor.FontSizeProperty || e.Property == AvaloniaEdit.TextEditor.ShowLineNumbersProperty) ApplyLineNumberFont(Editor);
         };
-        DocClose.Click += (_, _) => { if (_active is not null) _ = CloseDocumentAsync(_active); };
+        DocClose.Click += (_, _) => { if (_active is not null) CloseByUser(_active); };
         // Ctrl+wheel zooms the editor and both sides of a comparison.
         EditorHost.AddHandler(PointerWheelChangedEvent, (_, e) =>
         {
@@ -565,7 +567,7 @@ public partial class MainWindow : Window
             fileItem.AddHandler(PointerReleasedEvent, (_, pe) =>
             {
                 if (pe.InitialPressMouseButton == MouseButton.Middle && fileItem.DataContext is EditorDocument d)
-                    _ = CloseDocumentAsync(d);
+                    CloseByUser(d);
             }, RoutingStrategies.Tunnel);
         }
         else if (e.Container is TreeViewItem groupItem && groupItem.DataContext is FileGroup)
@@ -638,6 +640,12 @@ public partial class MainWindow : Window
         if (_markdown is null || e.Handled) return;
         bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         bool plain = (e.KeyModifiers & ~KeyModifiers.Shift) == KeyModifiers.None;
+        // On a table drawn as a grid: the arrows go from cell to cell, Enter edits the current cell.
+        if (e.KeyModifiers == KeyModifiers.None && e.Key is Key.Left or Key.Right or Key.Up or Key.Down or Key.Enter && HandleGridKey(e.Key))
+        {
+            e.Handled = true;
+            return;
+        }
         switch (e.Key)
         {
             case Key.Tab when plain:

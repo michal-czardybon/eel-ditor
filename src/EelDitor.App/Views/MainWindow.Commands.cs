@@ -196,7 +196,7 @@ public partial class MainWindow
         Add("file.save", "Menu.File.Save", () => { if (_active is not null) _ = SaveAsync(_active); }, ["Ctrl+S"]);
         Add("file.saveAs", "Menu.File.SaveAs", () => { if (_active is not null) _ = SaveAsync(_active, saveAs: true); }, ["F12", "Ctrl+Alt+S"]);
         Add("file.saveAll", "Menu.File.SaveAll", () => _ = SaveAllAsync(), ["Ctrl+Shift+S"]);
-        Add("file.close", "Menu.File.Close", () => { if (_active is not null) _ = CloseDocumentAsync(_active); }, ["Ctrl+W", "Ctrl+F4"]);
+        Add("file.close", "Menu.File.Close", () => { if (_active is not null) CloseByUser(_active); }, ["Ctrl+W", "Ctrl+F4"]);
         Add("file.closeAll", "Menu.File.CloseAll", () => _ = CloseManyAsync(_files.Documents), ["Ctrl+Shift+W"]);
         Add("file.closeOthers", "Menu.File.CloseOthers", () => _ = CloseManyAsync(_files.Documents.Where(d => !ReferenceEquals(d, _active))));
         Add("file.exportPdf", "Export.Pdf", () => _ = ExportAsync(pdf: true), null, () => _active is not null);
@@ -437,7 +437,7 @@ public partial class MainWindow
             Sub("Menu.Search.Bookmarks", Item("search.bookmark"), Item("search.nextBookmark"), Item("search.prevBookmark"), Item("search.clearBookmarks"))));
 
         MainMenu.Items.Add(Sub("Menu.View",
-            Item("view.wrap"), Sep(),
+            Item("view.wrap"), Item("md.raw"), Sep(),
             Item("view.whitespace"), Item("view.eol"), Item("view.allChars"), Sep(),
             Item("view.lineNumbers"), Item("view.currentLine"), Sep(),
             Item("view.sidebar"), Item("view.filesPanel"), Item("view.gitPanel"), Item("view.map"), Item("view.results"), Item("view.filter"), Item("view.goToFile"), Item("view.nextDoc"), Item("view.prevDoc"), Sep(),
@@ -446,19 +446,20 @@ public partial class MainWindow
 
         MainMenu.Items.Add(encodingMenu);
 
+        // Markdown: styles, the heading levels in place (no submenu), lists and images. Tables have a menu of their
+        // own (one click less to reach them); the plain-text view of Markdown is in View.
         MainMenu.Items.Add(Sub("Menu.Markdown",
             Item("md.bold"), Item("md.italic"), Item("md.strike"), Item("md.code"), Item("md.highlight"), Item("md.sub"), Item("md.sup"), Item("md.clearFormat"), Sep(),
-            Item("md.task"), Item("md.list.itemAbove"), Item("md.list.itemBelow"), Item("md.image"), Sep(),
-            Sub("Menu.Md.Heading", Item("md.h1"), Item("md.h2"), Item("md.h3"), Item("md.h4"), Item("md.h5"), Item("md.h6"), Item("md.h0")),
-            Sub("Menu.Md.Table",
-                Item("md.table.insert"), Item("md.table.editCell"), Sep(),
-                Item("md.table.rowAbove"), Item("md.table.rowBelow"), Item("md.table.colLeft"), Item("md.table.colRight"), Sep(),
-                Item("md.table.delRow"), Item("md.table.delCol"), Sep(),
-                Item("md.table.rowUp"), Item("md.table.rowDown"), Item("md.table.colMoveLeft"), Item("md.table.colMoveRight"), Sep(),
-                Item("md.table.selCol"), Item("md.table.selRow"), Item("md.table.copyCol"), Sep(),
-                Item("md.table.split"), Item("md.table.format")),
-            Sep(),
-            Item("md.raw")));
+            Item("md.h0"), Item("md.h1"), Item("md.h2"), Item("md.h3"), Item("md.h4"), Item("md.h5"), Item("md.h6"), Sep(),
+            Item("md.task"), Item("md.list.itemAbove"), Item("md.list.itemBelow"), Item("md.image")));
+
+        MainMenu.Items.Add(Sub("Menu.Md.Table",
+            Item("md.table.insert"), Item("md.table.editCell"), Sep(),
+            Item("md.table.rowAbove"), Item("md.table.rowBelow"), Item("md.table.colLeft"), Item("md.table.colRight"), Sep(),
+            Item("md.table.delRow"), Item("md.table.delCol"), Sep(),
+            Item("md.table.rowUp"), Item("md.table.rowDown"), Item("md.table.colMoveLeft"), Item("md.table.colMoveRight"), Sep(),
+            Item("md.table.selCol"), Item("md.table.selRow"), Item("md.table.copyCol"), Sep(),
+            Item("md.table.split"), Item("md.table.format")));
 
         MainMenu.Items.Add(Sub("Menu.Compare",
             Item("diff.head"), Item("diff.disk"), Item("diff.file"), Sep(),
@@ -676,7 +677,7 @@ public partial class MainWindow
             bool hasPath = doc.FilePath is not null;
             menu.Items.Add(M("Menu.File.Save", () => _ = SaveAsync(doc)));
             menu.Items.Add(M("Menu.File.Reload", () => _ = ReloadAsync(doc, null), hasPath));
-            menu.Items.Add(M("Menu.File.Close", () => _ = CloseDocumentAsync(doc)));
+            menu.Items.Add(M("Menu.File.Close", () => CloseByUser(doc)));
             menu.Items.Add(M("Menu.File.CloseOthers", () => _ = CloseManyAsync(_files.Documents.Where(d => !ReferenceEquals(d, doc)))));
             menu.Items.Add(new Separator());
             menu.Items.Add(BuildDisplayAsMenu(doc));

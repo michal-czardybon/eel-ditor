@@ -151,7 +151,9 @@ the whole view; Backspace or Delete anywhere on it removes the whole line.
 
 **Virtual alignment (no wrap).** `TableLayout` computes per-column widths from *shown* text (hidden markers removed,
 East Asian wide characters count as two) and `PaddingGenerator` inserts virtual spaces (dashes in the separator row)
-before pipes. Padding is merged with a neighbouring real character so the caret never stops inside padding. The source
+before pipes. Padding is merged with a neighbouring real character so the caret never stops inside padding. After a
+cell's text it goes at the cell's last space before the pipe, so a space typed after the text shows where it was typed
+(merged with the first space, the caret jumped past the padding). The source
 keeps its original spacing.
 
 **Grid (word wrap on).** A table row is drawn as an ASCII-style box grid (`TableRowElement`, one element for the whole
@@ -161,9 +163,16 @@ columns keep their width and wide ones share the rest.
 - A grid row is **not editable in place** (one source line ↔ many drawn lines). Editing goes through the cell editor
   (double click / command). The caret on a grid row is hidden (`CaretBrush` transparent) and **the current cell** — the
   one whose source contains the caret — is outlined instead: cells are what operations act on (editing, Tab). A click
-  puts the caret into the clicked cell's text. The outline is drawn by the row's own run, not by a background renderer,
-  so it lines up with the grid exactly; the editor's current-line band is turned off on grid rows (it covers the whole
+  puts the caret into the clicked cell's text. The outline lies on the grid's own lines (the middle of the │ borders and of
+  the +---+ lines above and below, measured where the neighbouring rows really are), drawn in a layer above the text,
+  so nothing — text or the in-place editor — overlaps it, and neighbouring frames share their edges; the editor's current-line band is turned off on grid rows (it covers the whole
   row element including its bottom border, which looked shifted down).
+- **Moving between cells like in a spreadsheet:** on a grid row the arrows go from cell to cell (Left/Right stop at
+  the row's edge to the previous row's last / next row's first cell, Up/Down keep the cell index), the separator is
+  skipped and past the table's edge the caret goes to the line before/after it; Enter edits the current cell. A double
+  click edits the cell with the caret where it was clicked (nothing selected); F2 and Enter select the cell's text. Without this the row, being one element, sent the caret to its first or last cell.
+- **Images in tables are shown as their text** (italic) in every view — as text, as a grid and in the cell editor —
+  because a grid cell cannot hold a preview; before, the preview appeared in some views and not in others.
 - **Selecting text in a grid** is a separate display-only selection (`GridTextSelection`): drag inside one cell selects
   its shown text, across cells selects whole cells; Ctrl+C copies shown text (several cells: TSV, one line per row).
   Select column / Select row use this selection in a grid (the source ranges the text mode highlights are not drawn there).
@@ -172,13 +181,16 @@ columns keep their width and wide ones share the rest.
   markup), and the selection stays, so the next command applies to the same cells. In a grid without a selection they
   apply to the current cell. A header cell is bold as a whole in the model (as the grid draws it), so adding a style
   there is not mistaken for a change of its boldness.
-- **Selected cells are outlined**, like the current cell, not highlighted: the text stays readable and its styles
+- **Selected cells are outlined** on the grid lines, like the current cell, not highlighted: the text stays readable and its styles
   visible. Part of one cell's text is highlighted as text.
-- **The cell editor in a grid lies exactly over the cell's text** and wraps at the cell's width, so the text keeps its
-  layout while edited; it is as tall as the text plus one line (measured after layout, growing while typing), so it
-  needs no scroll bar. In-place editing without an editor would need a caret, selection, input and IME of our own for
-  grid rows (AvaloniaEdit lays a line out as one flow of elements; cells side by side cannot be expressed), so it is
-  not done; the overlay is made to look in place instead.
+- **Editing a grid cell looks like editing in place**: the cell editor has no frame and the cell's background, lies
+  exactly over the cell's text (inside the current cell's outline), wraps at the cell's width and is as tall as the
+  text. Every change is written into the row at once, so the row and its neighbours follow the typing; the whole edit
+  is one undo step, and Esc puts the row back exactly as it was. A change that would break the row is not written and
+  is reported on the status bar. Spaces typed after the text (not part of the cell's width yet) widen the editor too,
+  so they do not wrap to the next line. There are no hints in the editor. True in-place editing (no editor at all) would need
+  a caret, selection, input and IME of our own for grid rows — AvaloniaEdit lays a line out as one flow of elements,
+  and cells side by side cannot be expressed — so it is not done.
 - **Clipboard:** copying selected cells puts Markdown rows (plain text; whole rows exactly as written, a header with a
   separator) and an HTML table (Windows "HTML Format", others text/html) for Word and Excel. Pasting in a table inserts
   rows above the current row (below the separator when on the header): from Markdown rows, an HTML table (Word, web)
@@ -255,7 +267,16 @@ diff-friendly mode.
   highlighted; resizable by dragging.
 - **Word diff** (`git diff --word-diff` semantics: a word is a run of non-whitespace) is one read-only text with
   deleted/inserted words; it follows edits of the working copy. Lines are compared first, words only inside changed
-  blocks. It shows that re-breaking lines changed no words.
+  blocks. It shows that re-breaking lines changed no words. The word view is always wrapped (one text, nothing to
+  align), the change F7 / Shift+F7 went to is outlined, and the bottom line panel is hidden there (the word view shows
+  both versions already). Switching between the modes keeps the place (the current block's change, or the caret's line).
+- **Next / previous change brings the change itself into view:** the caret goes to the block's first changed character
+  (the common beginning of the two lines when a line is too long for the character diff) and the view scrolls
+  horizontally to it. With one line per paragraph a change is often far to the right; going to the line's start or only
+  moving the caret looked like the command did nothing.
+- **Closing never closes the compared file by surprise:** while a file is compared, the first close (Ctrl+W, ✕ in the
+  file list, its menu, a middle click) ends the comparison and only the next one closes the file; the file header's ✕
+  is hidden then, leaving only the comparison's ✕.
 - While comparing, only Undo/Redo of the editing commands are allowed; they go to the editable side (so "Revert all"
   is undone by Ctrl+Z, also in word mode).
 - **Git panel:** unstaged/staged lists, commit message, Rescan / Commit / Push. File context menu: log, diff vs HEAD,
@@ -286,6 +307,11 @@ diff-friendly mode.
   convention, the longest line, conflicts, the dirty marker) is recomputed from the text after edits (debounced),
   never kept from the last command. Choices the user made ("Leave as is" for mixed endings) are kept.
 - Comparison commands say what they do: "Diff vs HEAD", "Diff vs version on disk", "Diff vs another file…".
+- **Menus are shallow where work happens often:** tables have a top-level Table menu; the Markdown menu lists the
+  heading levels in place (no submenu); the plain-text view of Markdown is a View option.
+- **One place per setting:** Preferences holds only what has no menu (theme, language, font, large files); tab width,
+  spaces and automatic reload live in the Settings menu only. Every window and dialog uses the app's grey background
+  (`ChromeBrush`), never the theme's near-black default.
 - Window title: app name first, then the file name.
 
 ---

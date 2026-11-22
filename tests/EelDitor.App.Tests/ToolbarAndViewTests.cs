@@ -172,6 +172,39 @@ public class ToolbarAndViewTests
     }
 
     [AvaloniaFact]
+    public void Menus_TableOnItsOwn_HeadingsInPlace_PlainTextViewInView()
+    {
+        var (w, _) = Open("m.md", "# T\n");
+        MenuItem Top(string key) => w.MainMenu.Items.OfType<MenuItem>().Single(i => (string?)i.Header == Loc.T(key));
+        IEnumerable<string?> Headers(MenuItem m) => m.Items.OfType<MenuItem>().Select(i => (string?)i.Header);
+        var markdown = Top("Menu.Markdown");
+        Assert.Contains(Loc.T("Menu.Md.H1"), Headers(markdown));                 // no Heading submenu to open
+        var headers = Headers(markdown).ToList();
+        Assert.Equal(headers.IndexOf(Loc.T("Menu.Md.H0")) + 1, headers.IndexOf(Loc.T("Menu.Md.H1"))); // Normal text first
+        Assert.DoesNotContain(Loc.T("Menu.Md.Table"), Headers(markdown));
+        Assert.DoesNotContain(Loc.T("Menu.Md.Raw"), Headers(markdown));
+        Assert.Contains(Loc.T("Menu.Md.Table.Split"), Headers(Top("Menu.Md.Table")));
+        Assert.Contains(Loc.T("Menu.Md.Raw"), Headers(Top("Menu.View")));
+    }
+
+    [AvaloniaFact]
+    public void WhileComparing_ClosingTheFile_ClosesTheComparisonFirst()
+    {
+        var (w, doc) = Open("c.txt", "ala\n");
+        w.OpenDiff("HEAD", "ola\n", "working", doc.Document, true, null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(w.DocClose.IsVisible);                                      // only the comparison's ✕
+        w.RunCommand("file.close");
+        Pump(200);
+        Assert.Null(w.CurrentDiffView);
+        Assert.Contains(doc, ((OpenFilesModel)w.DataContext!).Documents);        // the file is still open
+        Assert.True(w.DocClose.IsVisible);
+        w.RunCommand("file.close");
+        Pump(200);
+        Assert.DoesNotContain(doc, ((OpenFilesModel)w.DataContext!).Documents);
+    }
+
+    [AvaloniaFact]
     public void TableButtons_AppearOnlyInATable_AndDiffButtonsOnlyWhileComparing()
     {
         var (w, doc) = Open("t.md", "tekst\n\n| a | b |\n|---|---|\n| 1 | 2 |\n");

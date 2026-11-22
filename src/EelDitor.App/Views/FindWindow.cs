@@ -39,6 +39,7 @@ public sealed class FindWindow : Window
     {
         _settings = settings;
         Title = Loc.T("Find.InFilesTitle");
+        this.Res(BackgroundProperty, "ChromeBrush"); // the window grey, not the theme's near-black
         MinWidth = 560;
         Width = 640;
         SizeToContent = SizeToContent.Height;

@@ -41,6 +41,7 @@ public sealed class MarkdownView : IDisposable
     private readonly TableGridGenerator _grid;
     private readonly RuleGenerator _rules;
     private readonly RuleRenderer _ruleRenderer;
+    private readonly CurrentCellRenderer _cellRenderer;
     private readonly LineHeightPrimer _primer;
     private readonly LongLineGenerators _longLines;
     private readonly GridTextSelection _gridSelection;
@@ -74,6 +75,7 @@ public sealed class MarkdownView : IDisposable
         tv.ElementGenerators.Insert(4, _rules);
         _ruleRenderer = new RuleRenderer(this);
         tv.BackgroundRenderers.Add(_ruleRenderer);
+        _cellRenderer = new CurrentCellRenderer(this, tv).Attach();
 
         // Lines over 3000 characters (long table rows) get the generated elements too; this must run first.
         _longLines = new LongLineGenerators(tv);
@@ -201,9 +203,13 @@ public sealed class MarkdownView : IDisposable
             _currentCell = current;
         }
         _editor.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
+        _cellRenderer?.InvalidateVisual();
     }
 
     private (int Line, int Cell)? _currentCell;
+
+    /// <summary>Redraws the frames of the current and the selected cells.</summary>
+    internal void InvalidateCellFrames() => _cellRenderer?.InvalidateVisual();
 
     /// <summary>The user's current-line highlight, turned off while the caret is on a grid row; null when not changed.</summary>
     private bool? _highlightLine;
@@ -380,10 +386,19 @@ public sealed class MarkdownView : IDisposable
     public event Action<string>? LinkActivated;
 
     /// <summary>Double click on a table cell drawn as a grid (word wrap on): line number (1-based) and cell index.</summary>
-    public event Action<int, int>? CellEditRequested;
+    public event Action<int, int, int?>? CellEditRequested;
 
     /// <summary>Tables are drawn as grids with wrapping cells (the editor wraps lines).</summary>
     public bool TablesAsGrid => _editor.WordWrap;
+
+    /// <summary>Image previews at all (off in the cell editor: a table shows its images the same way everywhere).</summary>
+    internal bool ShowImages { get; init; } = true;
+
+    /// <summary>
+    /// Whether images on the line are drawn as previews. Not in tables: a grid cannot show them, so a table shows an
+    /// image as its text (italic) in every view — as text, as a grid and in the cell editor alike.
+    /// </summary>
+    internal bool PreviewsImagesOn(DocumentLine line) => ShowImages && Model.TableAtLine(line.LineNumber - 1) is null;
 
     /// <summary>Grid layout of a table, recomputed when the model or the available width changes.</summary>
     internal TableGridLayout? GridLayout(MarkdownTable table) => _grid.Layout(table);
@@ -419,7 +434,7 @@ public sealed class MarkdownView : IDisposable
     }
 
     /// <summary>The cell under the pointer of a table row drawn as a grid, or null.</summary>
-    private (int Line, int Cell)? GridCellAt(PointerEventArgs e)
+    private (int Line, int Cell, int? Offset)? GridCellAt(PointerEventArgs e)
     {
         if (!TablesAsGrid) return null;
         var tv = _editor.TextArea.TextView;
@@ -431,7 +446,10 @@ public sealed class MarkdownView : IDisposable
         var widths = el.Layout.Widths;
         int cell = 0;
         while (cell + 1 < widths.Length && ch >= TableWrap.BorderAt(widths, cell + 1)) cell++;
-        return (visual.FirstDocumentLine.LineNumber, cell);
+        // Where in the cell's shown text: the cell editor puts its caret there.
+        int drawn = (int)Math.Floor((p.Y - visual.VisualTop) / Math.Max(1, tv.DefaultLineHeight));
+        int? offset = el.Hit((p.X - x0) / Math.Max(1, tv.WideSpaceWidth), drawn) is { } hit && hit.Cell == cell ? hit.Offset : null;
+        return (visual.FirstDocumentLine.LineNumber, cell, offset);
     }
 
     /// <summary>Checks or unchecks the task box on the given line (1-based); false when the line has none.</summary>
@@ -482,7 +500,7 @@ public sealed class MarkdownView : IDisposable
             int column = Model.TableAtLine(cell.Line - 1)?.RowAtLine(cell.Line - 1) is { } row && cell.Cell < row.Cells.Count
                 ? row.Cells[cell.Cell].ContentStart(_document.GetText(line)) : 0;
             _editor.TextArea.Caret.Offset = line.Offset + column;
-            CellEditRequested?.Invoke(cell.Line, cell.Cell);
+            CellEditRequested?.Invoke(cell.Line, cell.Cell, cell.Offset);
             e.Handled = true;
             return;
         }
@@ -631,6 +649,7 @@ public sealed class MarkdownView : IDisposable
         tv.ElementGenerators.Remove(_hidden);
         tv.ElementGenerators.Remove(_rules);
         tv.BackgroundRenderers.Remove(_ruleRenderer);
+        _cellRenderer.Detach();
         _editor.TextArea.RemoveHandler(InputElement.PointerPressedEvent, OnPointerPressed);
         _editor.TextArea.TextEntering -= OnTextEntering;
         _editor.TextArea.TextEntered -= OnTextEntered;
@@ -713,7 +732,7 @@ internal sealed class HiddenMarkupGenerator(MarkdownView view) : VisualLineEleme
         var line = context.VisualLine.FirstDocumentLine;
         _lineOffset = line.Offset;
         var render = view.RenderFor(line);
-        _images = render.Images;
+        _images = view.PreviewsImagesOn(line) ? render.Images : [];
         // Merge adjacent ranges (e.g. "***" parsed as "*" + "**") into a single element; an image tail stays
         // separate because the widget generator draws the preview in its place.
         foreach (var h in render.Hidden)
@@ -921,6 +940,7 @@ internal sealed class WidgetGenerator(MarkdownView view) : VisualLineElementGene
             _specs.Add(new Spec(line.Offset + render.TaskStart, render.TaskColumn + 3 - render.TaskStart, line.LineNumber, true, render.TaskChecked, null));
         // An image preview (one visual column) takes only the last character of the hidden "](path)"; the
         // characters before it are hidden markup. Elements of one column must cover one character (see WholeElement).
+        if (!view.PreviewsImagesOn(line)) return;
         foreach (var image in render.Images)
             if (image.AnchorStart + image.AnchorLength <= line.Length)
                 _specs.Add(new Spec(line.Offset + image.AnchorStart + image.AnchorLength - 1, 1, line.LineNumber, false, false, image.Path));
@@ -1170,6 +1190,21 @@ internal sealed class TableRowElement(int documentLength, TableGridLayout layout
     /// The cell and the position in its text at a point given in character columns and drawn line index from the
     /// element's top left; null on the separator row.
     /// </summary>
+    /// <summary>
+    /// The frame of a cell on the grid's own lines: the middle of its │ borders and of the +---+ lines above and below
+    /// its text (the line above belongs to the row before), relative to the element's top left.
+    /// </summary>
+    public Rect? CellFrame(int cell, double charWidth, double lineHeight)
+    {
+        if (cell < 0 || cell >= Layout.Widths.Length) return null;
+        int firstText = Lines.FindIndex(l => l.Cells is not null), lastText = Lines.FindLastIndex(l => l.Cells is not null);
+        if (firstText < 0) return null;
+        double left = (TableWrap.BorderAt(Layout.Widths, cell) + 0.5) * charWidth;
+        double right = (TableWrap.BorderAt(Layout.Widths, cell + 1) + 0.5) * charWidth;
+        double top = (firstText - 0.5) * lineHeight, bottom = (lastText + 1.5) * lineHeight;
+        return new Rect(left, top, right - left, bottom - top);
+    }
+
     public (int Cell, int Offset)? Hit(double column, int drawnLine)
     {
         if (kind == MdLineKind.TableSeparator || cells.Count == 0) return null;
@@ -1278,20 +1313,6 @@ internal sealed class TableRowRun(TextRunProperties properties, double charWidth
         double size = Properties.FontRenderingEmSize;
         var culture = System.Globalization.CultureInfo.CurrentCulture;
         var bold = new Typeface(tf.FontFamily, tf.Style, FontWeight.Bold, tf.Stretch);
-        // The current cell: outlined here, by the run itself, so it lines up with the grid exactly.
-        if (currentCell is int cell && widths is not null && cell < widths.Length)
-        {
-            int firstText = lines.FindIndex(l => l.Cells is not null), lastText = lines.FindLastIndex(l => l.Cells is not null);
-            if (firstText >= 0)
-            {
-                double x0 = origin.X + (TableWrap.BorderAt(widths, cell) + 0.5) * charWidth;
-                double x1 = origin.X + (TableWrap.BorderAt(widths, cell + 1) + 0.5) * charWidth;
-                double y0 = origin.Y + firstText * lineHeight, y1 = origin.Y + (lastText + 1) * lineHeight;
-                var rect = new Rect(x0, y0, Math.Max(0, x1 - x0), Math.Max(0, y1 - y0));
-                // An outline only: a fill would hide the selection, which is drawn below the text.
-                context.DrawRectangle(null, new Pen(palette.Accent, 1.5), rect.Deflate(0.75), 2, 2);
-            }
-        }
         // Not the run's brush: the Markdown colorizer dims the pipes, which are part of this element.
         var textBrush = kind == MdLineKind.TableHeader ? palette.Accent : palette.Foreground;
         for (int i = 0; i < lines.Count; i++)
@@ -1340,6 +1361,62 @@ internal sealed class TableRowRun(TextRunProperties properties, double charWidth
 
 
 /// <summary>A horizontal rule line (<c>---</c>): its characters are replaced by one empty element; <see cref="RuleRenderer"/> draws the line.</summary>
+/// <summary>
+/// Outlines the current cell of a grid on the grid's own lines (above the text layer, so the borders it covers show
+/// in the accent colour and nothing — text, the in-place cell editor — ever overlaps the outline).
+/// </summary>
+internal sealed class CurrentCellRenderer(MarkdownView view, TextView textView) : Control
+{
+    public CurrentCellRenderer Attach()
+    {
+        IsHitTestVisible = false;
+        textView.InsertLayer(this, KnownLayer.Text, LayerInsertionPosition.Above);
+        textView.ScrollOffsetChanged += Redraw;
+        textView.VisualLinesChanged += Redraw;
+        return this;
+    }
+
+    public void Detach()
+    {
+        textView.ScrollOffsetChanged -= Redraw;
+        textView.VisualLinesChanged -= Redraw;
+        textView.Layers.Remove(this);
+    }
+
+    private void Redraw(object? sender, EventArgs e) => InvalidateVisual();
+
+    public override void Render(DrawingContext drawingContext)
+    {
+        if (!textView.VisualLinesValid) return;
+        var pen = new Pen(view.Palette.Accent, 1.5);
+        double lh = textView.DefaultLineHeight;
+        static TableRowElement? Row(VisualLine? v) => v is { Elements.Count: 1 } && v.Elements[0] is TableRowElement e ? e : null;
+        // The middle of drawn line `index` of a grid row (the run draws its lines one line height apart from the top).
+        double Middle(VisualLine v, int index) => v.VisualTop - textView.ScrollOffset.Y + (index + 0.5) * lh;
+        void Frame(int line, int cell)
+        {
+            var visual = textView.GetVisualLine(line);
+            if (Row(visual) is not { } el || el.CellFrame(cell, textView.WideSpaceWidth, lh) is not { } frame) return;
+            int firstText = el.Lines.FindIndex(l => l.Cells is not null), lastText = el.Lines.FindLastIndex(l => l.Cells is not null);
+            // The +---+ lines around the text: this row's own, or the neighbouring row's (measured where it really is,
+            // so the frames of neighbouring rows meet on the same line).
+            double top = firstText > 0 ? Middle(visual!, firstText - 1)
+                : textView.GetVisualLine(line - 1) is { } previous && Row(previous) is { } p ? Middle(previous, p.Lines.Count - 1)
+                : Middle(visual!, firstText) - lh;
+            double bottom = lastText + 1 < el.Lines.Count ? Middle(visual!, lastText + 1)
+                : textView.GetVisualLine(line + 1) is { } next && Row(next) is not null ? Middle(next, 0)
+                : Middle(visual!, lastText) + lh;
+            double x0 = visual!.GetVisualPosition(0, VisualYPosition.LineTop).X - textView.ScrollOffset.X;
+            drawingContext.DrawRectangle(null, pen, new Rect(x0 + frame.X, top, frame.Width, bottom - top));
+        }
+        // Selected cells (several), then the current one; neighbours share their edges, as the grid's cells do.
+        if (view.TablesAsGrid && view.GridSelection.CellBlock is { } block)
+            foreach (int line in block.Lines)
+                for (int cell = block.FirstCell; cell <= block.LastCell; cell++) Frame(line, cell);
+        if (view.CurrentCell is { } current) Frame(current.Line, current.Cell);
+    }
+}
+
 internal sealed class RuleGenerator(MarkdownView view) : VisualLineElementGenerator
 {
     private int _offset = -1, _length;

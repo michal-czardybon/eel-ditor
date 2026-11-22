@@ -68,7 +68,7 @@ public static class Dialogs
         return result;
     }
 
-    private static Window CreateWindow(string title) => new()
+    private static Window CreateWindow(string title) => new Window
     {
         Title = title,
         SizeToContent = SizeToContent.WidthAndHeight,
@@ -76,5 +76,5 @@ public static class Dialogs
         ShowInTaskbar = false,
         WindowStartupLocation = WindowStartupLocation.CenterOwner,
         MinWidth = 320,
-    };
+    }.Res(Window.BackgroundProperty, "ChromeBrush"); // the window grey, not the theme's near-black
 }

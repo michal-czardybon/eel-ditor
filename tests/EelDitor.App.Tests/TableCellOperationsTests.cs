@@ -215,6 +215,13 @@ public class TableCellOperationsTests
         Assert.NotNull(w.CellEditor);
         Assert.Equal("dwa", w.CellEditor!.Text);
         Assert.Equal((3, 1), View(w).CurrentCell);
+        CloseEditor(w);
+    }
+
+    /// <summary>Leaves no open cell editor (and so no open undo group) behind: the next test's window waited on it.</summary>
+    private static void CloseEditor(MainWindow w)
+    {
+        if (w.CellEditor is not null) CellKey(w, Key.Escape);
     }
 
     [AvaloniaFact]
@@ -333,6 +340,77 @@ public class TableCellOperationsTests
         Assert.False(w.CommandCanExecute("md.table.split"));
     }
 
+    private static void CellKey(MainWindow w, Key key, KeyModifiers mods = KeyModifiers.None)
+    {
+        w.CellEditor!.TextArea.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = key, KeyModifiers = mods });
+        Settle();
+    }
+
+    [AvaloniaFact]
+    public void InAGrid_TheRowFollowsTheTyping_AndTheEditIsOneUndoStep()
+    {
+        var (w, doc) = Open("| a | b |\n|---|---|\n| jeden | dwa |\n", wrap: true);
+        w.EditTableCell(3, 1);
+        var editor = w.CellEditor!;
+        editor.TextArea.ClearSelection();
+        editor.CaretOffset = 3;
+        editor.Document.Insert(3, " i pół");
+        Settle();
+        Assert.Equal("| jeden | dwa i pół |", Line(doc, 3));          // written through while typing
+        editor.Document.Insert(editor.Document.TextLength, " razy");
+        Settle();
+        Assert.Equal("| jeden | dwa i pół razy |", Line(doc, 3));
+        CellKey(w, Key.Enter);
+        Assert.Null(w.CellEditor);
+        doc.Document.UndoStack.Undo();                                  // the whole edit at once
+        Assert.Equal("| jeden | dwa |", Line(doc, 3));
+    }
+
+    [AvaloniaFact]
+    public void InAGrid_TypingBackToTheOriginal_KeepsTheEditedCellCurrent()
+    {
+        var (w, doc) = Open("| a | b | c |\n|---|---|---|\n| komnata (7; room) | dwa | trzy |\n", wrap: true);
+        w.EditTableCell(3, 0);
+        var editor = w.CellEditor!;
+        editor.Document.Insert(5, "x");                       // type a character …
+        Settle();
+        Assert.Equal((3, 0), View(w).CurrentCell);
+        editor.Document.Remove(5, 1);                         // … and Backspace it: the text is the original again
+        Settle();
+        Assert.Equal("| komnata (7; room) | dwa | trzy |", Line(doc, 3));
+        Assert.Equal((3, 0), View(w).CurrentCell);            // not the last cell of the row
+        editor.Document.Insert(0, "a");
+        Settle();
+        Assert.Equal((3, 0), View(w).CurrentCell);
+        CloseEditor(w);
+    }
+
+    [AvaloniaFact]
+    public void InAGrid_EscPutsTheRowBack()
+    {
+        var (w, doc) = Open("| a | b |\n|---|---|\n| jeden | dwa<br/>trzy |\n", wrap: true);
+        w.EditTableCell(3, 1);
+        var editor = w.CellEditor!;
+        editor.Document.Insert(0, "zero ");
+        Settle();
+        Assert.Equal("| jeden | zero dwa<br>trzy |", Line(doc, 3));
+        CellKey(w, Key.Escape);
+        Assert.Equal("| jeden | dwa<br/>trzy |", Line(doc, 3));       // exactly as it was, <br/> too
+        Assert.False(doc.Document.UndoStack.CanUndo);
+    }
+
+    [AvaloniaFact]
+    public void InAGrid_AChangeThatWouldBreakTheRow_IsNotWritten()
+    {
+        var (w, doc) = Open("| a | b |\n|---|---|\n| jeden | `dwa` |\n", wrap: true);
+        w.EditTableCell(3, 1);
+        var editor = w.CellEditor!;
+        editor.Document.Text = "a | b";           // a bare pipe is escaped, so this one is fine
+        Settle();
+        Assert.Equal("| jeden | a \\| b |", Line(doc, 3));
+        CloseEditor(w);
+    }
+
     [AvaloniaFact]
     public void TabInTheCellEditor_MovesTheCurrentCell()
     {
@@ -344,5 +422,6 @@ public class TableCellOperationsTests
         while (w.CellEditor?.Text != "dwa" && DateTime.UtcNow < until) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(10); }
         Assert.Equal("dwa", w.CellEditor!.Text);
         Assert.Equal((3, 1), View(w).CurrentCell);
+        CloseEditor(w);
     }
 }

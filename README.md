@@ -24,7 +24,11 @@ The reasons behind these principles and the decisions made along the way are in 
 
 - Export to HTML and PDF
 - Latin ↔ Cyrillic conversion (Russian, Ukrainian, Serbian, Interslavic, Polish)
-- Extended Markdown features (highlight, subscript, superscript)
+- Extended Markdown features (highlight, subscript, superscript, todo lists)
+
+## Line-break conventions
+
+Eel prefers long lines (same as Claude), and word-by-word diff to compare them. This is a pure way to write paragraphs of natural text without thinking when to break, or how to reflow when some lines get longer or shorter after edits. However, when you open existing files these may follow other conventions. Eel can work with them too, and respects their choices. It auto-detects one of several conventions of line-breaks and informs you about what it sees on the toolbar. You can choose whether to make edits using the same convention, or another one. And whenever you want to enforce the currently chosen convention, select the text and press Alt+Q.
 
 ## Running
 

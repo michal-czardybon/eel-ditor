@@ -48,6 +48,9 @@ public static class TableLayout
                 }
 
                 int contentStart = cell.ContentStart(text), contentEnd = cell.ContentEnd(text);
+                // Padding after the content goes at the cell's last space (before the pipe), not right after the
+                // content: a space just typed after the content then shows where it is typed, before the padding.
+                int padAfter = contentEnd < cell.End - 1 && text[cell.End - 1] == ' ' ? cell.End - 1 : contentEnd;
                 bool empty = contentStart >= contentEnd;
                 var align = c < table.Alignments.Count ? table.Alignments[c] : ColumnAlignment.None;
                 if (empty)
@@ -62,11 +65,11 @@ public static class TableLayout
                 {
                     int left = missing / 2;
                     if (left > 0) render.Paddings.Add(new Padding(contentStart, left, ' '));
-                    render.Paddings.Add(new Padding(contentEnd, missing - left, ' '));
+                    render.Paddings.Add(new Padding(padAfter, missing - left, ' '));
                 }
                 else
                 {
-                    render.Paddings.Add(new Padding(contentEnd, missing, ' '));
+                    render.Paddings.Add(new Padding(padAfter, missing, ' '));
                 }
             }
         }

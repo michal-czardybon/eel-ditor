@@ -29,6 +29,7 @@ public sealed class DiffView : Grid
     private readonly GridSplitter _splitter;
     private WordDiffResult? _wordDiff;
     private bool _wordMode;
+    private int _currentChange = -1;     // word mode: the change F7 went to (outlined), or -1
     private readonly TextBlock _leftTitle = new() { FontSize = 12, Margin = new Thickness(8, 3), TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBlock _rightTitle = new() { FontSize = 12, Margin = new Thickness(8, 3), TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBlock _summary = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0) };
@@ -63,7 +64,10 @@ public sealed class DiffView : Grid
         _words = CreateEditor(font, fontSize);
         _words.IsReadOnly = true;
         _words.IsVisible = false;
+        // One text for reading (no sides to keep aligned): wrapped, so a change in a long paragraph is on screen.
+        _words.WordWrap = true;
         _words.TextArea.TextView.LineTransformers.Add(new WordDiffColorizer(this));
+        _words.TextArea.TextView.BackgroundRenderers.Add(new CurrentChangeRenderer(this));
 
         _registry = new EelRegistryOptions(theme);
         if (extension is not null && _registry.GetLanguageByExtension(extension) is { } lang)
@@ -85,8 +89,8 @@ public sealed class DiffView : Grid
 
         // The commands are on the main toolbar; here only the titles, the summary (right side) and ✕.
         LeftIsBase = !leftEditable && rightEditable;
-        // Labelled: the file's own ✕ is right above it.
-        var close = new Button { Content = "✕  " + Loc.T("Diff.Close"), FontSize = 11, Padding = new Thickness(10, 0), Background = Brushes.Transparent, VerticalAlignment = VerticalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Center };
+        // Like the file's ✕ (which is hidden while comparing, so this one is the only ✕ there).
+        var close = new Button { Content = "✕", Padding = new Thickness(10, 0), Background = Brushes.Transparent, VerticalAlignment = VerticalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Center };
         ToolTip.SetTip(close, Loc.T("Diff.Close") + " (Shift+Esc)");
         close.Click += (_, _) => CloseRequested?.Invoke();
         _summary.TextTrimming = TextTrimming.CharacterEllipsis;
@@ -163,11 +167,21 @@ public sealed class DiffView : Grid
         set
         {
             if (_wordMode == value) return;
+            // The same place in the other mode: the current block's change, or the line the caret is on.
+            int block = CurrentBlock;
+            int newLine = value ? (block >= 0 ? _diff.Blocks[block].NewStart : CaretNewLine()) : NewLineOfWordsOffset(_words.CaretOffset);
+            bool onChange = value && block >= 0;
             _wordMode = value;
             _left.IsVisible = _right.IsVisible = _splitter.IsVisible = !value;
             _words.IsVisible = value;
             if (value) ComputeWords();
             UpdateSummary();
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_closed || _wordMode != value) return;
+                if (value) ShowWordsAt(newLine, onChange);
+                else ShowLinesAt(newLine);
+            }, DispatcherPriority.Background);
             WordModeChanged?.Invoke(value);
         }
     }
@@ -178,6 +192,83 @@ public sealed class DiffView : Grid
 
     public TextEditor WordsEditor => _words;
 
+    /// <summary>The caret's line of the focused side, as a line of the new (right) text (0-based).</summary>
+    private int CaretNewLine() => _leftActive
+        ? _diff.MapOldToNew(_left.TextArea.Caret.Line - 1)
+        : _right.TextArea.Caret.Line - 1;
+
+    /// <summary>Word mode at a line of the new text: on its change (outlined) when it is in one.</summary>
+    private void ShowWordsAt(int newLine, bool onChange)
+    {
+        if (_wordDiff is not { } w) return;
+        int offset = WordsOffsetOfNewLine(newLine);
+        _currentChange = -1;
+        if (onChange && w.Changes.Count > 0)
+        {
+            int i = Enumerable.Range(0, w.Changes.Count).FirstOrDefault(k => w.Changes[k] >= offset, w.Changes.Count - 1);
+            _currentChange = i;
+            offset = w.Changes[i];
+        }
+        _words.CaretOffset = Math.Min(offset, _words.Document.TextLength);
+        Reveal(_words);
+        _words.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
+    }
+
+    /// <summary>The sides at a line of the new text (and its counterpart on the left).</summary>
+    private void ShowLinesAt(int newLine)
+    {
+        MoveCaret(_right, newLine);
+        MoveCaret(_left, _diff.MapNewToOld(newLine));
+        Reveal(_leftActive ? _left : _right);
+        InvalidateBlocks();
+    }
+
+    /// <summary>
+    /// Where a line of the new text starts in the word view: the word view is the new text with the removed runs put
+    /// back, so its line breaks outside removed runs are the new text's.
+    /// </summary>
+    internal int WordsOffsetOfNewLine(int newLine)
+    {
+        if (_wordDiff is not { } w || newLine <= 0) return 0;
+        int line = 0;
+        foreach (int i in NewLineBreaks(w, w.Text.Length))
+            if (++line == newLine) return i + 1;
+        return w.Text.Length;
+    }
+
+    /// <summary>The line of the new text an offset of the word view is on (0-based).</summary>
+    internal int NewLineOfWordsOffset(int offset) => _wordDiff is { } w ? NewLineBreaks(w, offset).Count() : 0;
+
+    /// <summary>The word view's line breaks before <paramref name="end"/> that are the new text's (not in removed runs).</summary>
+    private static IEnumerable<int> NewLineBreaks(WordDiffResult w, int end)
+    {
+        int span = 0;
+        for (int i = 0; i < Math.Min(end, w.Text.Length); i++)
+        {
+            if (w.Text[i] != '\n') continue;
+            while (span < w.Spans.Count && w.Spans[span].End <= i) span++;
+            if (span < w.Spans.Count && w.Spans[span].Start <= i && w.Spans[span].Kind == WordChange.Deleted) continue;
+            yield return i;
+        }
+    }
+
+    /// <summary>
+    /// Brings the caret's place into view: the line to the middle when it is off screen, and the column (a change far
+    /// to the right in a long line) horizontally.
+    /// </summary>
+    private static void Reveal(TextEditor editor)
+    {
+        var tv = editor.TextArea.TextView;
+        editor.UpdateLayout();
+        if (tv.Bounds.Height <= 0 || editor.Document is null) return;
+        var p = tv.GetVisualPosition(editor.TextArea.Caret.Position, VisualYPosition.LineMiddle);
+        double height = tv.Bounds.Height, width = tv.Bounds.Width;
+        if (p.Y < tv.VerticalOffset + tv.DefaultLineHeight || p.Y > tv.VerticalOffset + height - tv.DefaultLineHeight)
+            editor.SetVerticalOffset(p.Y - height / 2);
+        if (!editor.WordWrap && (p.X < tv.HorizontalOffset || p.X > tv.HorizontalOffset + width - 4 * tv.WideSpaceWidth))
+            editor.SetHorizontalOffset(Math.Max(0, p.X - width / 3));
+    }
+
     private void ComputeWords() => ShowWords(WordDiff.Compute(_left.Document.Text, _right.Document.Text));
 
     private void ShowWords(WordDiffResult result)
@@ -185,6 +276,7 @@ public sealed class DiffView : Grid
         int caret = _words.CaretOffset;
         double offset = _words.VerticalOffset;
         _wordDiff = result;
+        _currentChange = -1;
         _words.Document = ReadOnlyDocument(result.Text);
         _words.CaretOffset = Math.Min(caret, _words.Document.TextLength);
         _words.SetVerticalOffset(offset);
@@ -328,13 +420,14 @@ public sealed class DiffView : Grid
         {
             if (_wordDiff is not { Changes.Count: > 0 } w) return;
             int caret = _words.CaretOffset;
-            int target = direction > 0
-                ? w.Changes.FirstOrDefault(c => c > caret, w.Changes[0])
-                : w.Changes.LastOrDefault(c => c < caret, w.Changes[^1]);
-            _words.CaretOffset = target;
-            var loc = _words.Document.GetLocation(target);
-            _words.ScrollTo(loc.Line, loc.Column);
+            int index = direction > 0
+                ? Enumerable.Range(0, w.Changes.Count).FirstOrDefault(i => w.Changes[i] > caret, 0)
+                : Enumerable.Range(0, w.Changes.Count).LastOrDefault(i => w.Changes[i] < caret, w.Changes.Count - 1);
+            _currentChange = index;
+            _words.CaretOffset = w.Changes[index];
             _words.Focus();
+            Reveal(_words);
+            _words.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
             return;
         }
         if (_diff.Blocks.Count == 0) return;
@@ -356,17 +449,39 @@ public sealed class DiffView : Grid
             if (idx < 0) idx = blocks.Count - 1;
         }
         var block = blocks[idx];
-        MoveCaret(_right, block.NewStart);
-        MoveCaret(_left, block.OldStart);
-        editor.ScrollTo(Math.Min(Start(block) + 1, editor.Document.LineCount), 1);
+        // On the first changed character of the block (in a long line it may be far to the right).
+        int column = ChangedColumn(block);
+        MoveCaret(_right, block.NewStart, FirstChange(_diff.NewInline, block.NewStart, block.NewCount, column));
+        MoveCaret(_left, block.OldStart, FirstChange(_diff.OldInline, block.OldStart, block.OldCount, column));
         editor.Focus();
+        Reveal(editor);
         InvalidateBlocks();
     }
 
-    private static void MoveCaret(TextEditor editor, int line0)
+    private static void MoveCaret(TextEditor editor, int line0, int column0 = 0)
     {
         int line = Math.Clamp(line0 + 1, 1, editor.Document.LineCount);
-        editor.TextArea.Caret.Position = new TextViewPosition(line, 1);
+        int length = editor.Document.GetLineByNumber(line).Length;
+        editor.TextArea.Caret.Position = new TextViewPosition(line, Math.Clamp(column0, 0, length) + 1);
+    }
+
+    /// <summary>
+    /// The column of the first changed character on the block's first line: from the character diff, or (very long
+    /// lines have none) <paramref name="fallback"/>.
+    /// </summary>
+    private static int FirstChange(IReadOnlyList<InlineChange> inline, int start, int count, int fallback) =>
+        count == 0 ? 0 : inline.Where(c => c.Line == start).Select(c => c.Start).DefaultIfEmpty(fallback).Min();
+
+    /// <summary>Where the first lines of a changed block start to differ (their common beginning), or 0.</summary>
+    private int ChangedColumn(DiffBlock block)
+    {
+        if (block.OldCount == 0 || block.NewCount == 0 || block.OldStart >= _left.Document.LineCount || block.NewStart >= _right.Document.LineCount)
+            return 0;
+        string a = _left.Document.GetText(_left.Document.GetLineByNumber(block.OldStart + 1));
+        string b = _right.Document.GetText(_right.Document.GetLineByNumber(block.NewStart + 1));
+        int i = 0;
+        while (i < a.Length && i < b.Length && a[i] == b[i]) i++;
+        return i;
     }
 
     /// <summary>Copies the current block to the other side (WinMerge "copy to right/left").</summary>
@@ -520,6 +635,30 @@ public sealed class DiffView : Grid
                     if (deleted) el.TextRunProperties.SetTextDecorations(TextDecorations.Strikethrough);
                 });
             }
+        }
+    }
+
+    /// <summary>Word mode: an outline around the change F7 / Shift+F7 went to.</summary>
+    private sealed class CurrentChangeRenderer(DiffView view) : IBackgroundRenderer
+    {
+        public KnownLayer Layer => KnownLayer.Background;
+
+        public void Draw(TextView textView, DrawingContext dc)
+        {
+            if (!view._wordMode || view._wordDiff is not { } w || view._currentChange < 0 || view._currentChange >= w.Changes.Count
+                || !textView.VisualLinesValid || textView.Document is null) return;
+            int start = w.Changes[view._currentChange], end = start;
+            foreach (var span in w.Spans)
+            {
+                if (span.End <= start) continue;
+                if (span.Start > end) break;
+                end = Math.Max(end, span.End);
+            }
+            end = Math.Min(end, textView.Document.TextLength);
+            if (end <= start) return;
+            var builder = new BackgroundGeometryBuilder { CornerRadius = 2 };
+            builder.AddSegment(textView, new TextSegment { StartOffset = start, EndOffset = end });
+            if (builder.CreateGeometry() is { } g) dc.DrawGeometry(null, new Pen(view.Palette.Accent, 1.5), g);
         }
     }
 

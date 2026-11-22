@@ -25,6 +25,9 @@ namespace EelDitor.App.Views;
 /// otherwise nothing is written and the editor says why. Only the changed part of the line is replaced.</item>
 /// <item>Enter saves, Esc cancels, Tab / Shift+Tab save and move to the next / previous cell; clicking elsewhere
 /// or scrolling saves too.</item>
+/// <item>In a grid it looks like editing in place: no frame, the cell's background, exactly over the cell's text and
+/// as wide; every change is written into the row at once (the row and its neighbours follow), the whole edit is one
+/// undo step, and Esc puts the row back as it was. Problems are reported on the status bar.</item>
 /// </list>
 /// </summary>
 public partial class MainWindow
@@ -46,7 +49,8 @@ public partial class MainWindow
         EditTableCell(at.Table.FirstLine + row + 1, _markdown.TablesAsGrid ? 0 : Math.Max(0, at.Column));
     }
 
-    internal void EditTableCell(int lineNumber, int cellIndex)
+    /// <param name="shownOffset">Where the caret goes in the cell's shown text (a double click); null: all selected.</param>
+    internal void EditTableCell(int lineNumber, int cellIndex, int? shownOffset = null)
     {
         if (_cellPopup is { IsOpen: true }) _cellPopup.IsOpen = false; // saves the open one
         if (_markdown is not { } view || Editor.IsReadOnly || lineNumber < 1 || lineNumber > Editor.Document.LineCount) return;
@@ -78,13 +82,12 @@ public partial class MainWindow
         int? gridColumns = view.TablesAsGrid && table is not null && view.GridLayout(table) is { } layout && cellIndex < layout.Widths.Length
             ? layout.Widths[cellIndex] : null;
         var (width, height) = gridColumns is int columns ? GridCellEditorSize(original, columns) : CellEditorSize(original, rect.Width);
-        if (gridColumns is not null)
-        {
-            // The popup's frame (1 + 3), the editor's padding (4, 2) and the text area's own margin (about 5) put the
-            // text that far from the popup's corner (measured on a rendered frame).
-            double cw = Editor.TextArea.TextView.WideSpaceWidth;
-            rect = new Rect(rect.X + 2 * cw - (1 + 3 + 4 + 5), rect.Y - (1 + 3 + 2), rect.Width, rect.Height);
-        }
+        bool inPlace = gridColumns is not null;
+        // The editor's padding (4, 2) puts the text that far from the popup's corner (measured on a rendered frame);
+        // the text then lies exactly on the cell's text, inside the current cell's outline.
+        Rect Place(Rect cellRect) =>
+            new(cellRect.X + 2 * Editor.TextArea.TextView.WideSpaceWidth - 4, cellRect.Y - 2, cellRect.Width, cellRect.Height);
+        if (inPlace) rect = Place(rect);
         var editor = new TextEditor
         {
             Document = new TextDocument(original),
@@ -103,16 +106,14 @@ public partial class MainWindow
         editor.Options.EnableHyperlinks = false;
         editor.Options.HighlightCurrentLine = false;
         editor.TextArea.SelectionBrush = Palette.Selection;
-        var cellView = new MarkdownView(editor, editor.Document, Palette, _active?.DirectoryPath);
+        var cellView = new MarkdownView(editor, editor.Document, Palette, _active?.DirectoryPath) { ShowImages = false };
 
-        var hint = new TextBlock { Text = Loc.T("Table.CellEditHint"), FontSize = 11, Margin = new Thickness(4, 3, 4, 1), TextWrapping = Avalonia.Media.TextWrapping.Wrap, MaxWidth = Math.Max(width, 300) }
-            .Res(TextBlock.ForegroundProperty, "DimTextBrush");
+        // Problems (a change that would break the row) go to the status bar; in text mode also under the editor.
         var error = new TextBlock { FontSize = 12, Margin = new Thickness(4, 3, 4, 1), TextWrapping = Avalonia.Media.TextWrapping.Wrap, MaxWidth = Math.Max(width, 300), IsVisible = false }
             .Res(TextBlock.ForegroundProperty, "GitDeletedBrush");
         var panel = new StackPanel { Orientation = Orientation.Vertical };
         panel.Children.Add(editor);
-        panel.Children.Add(error);
-        panel.Children.Add(hint);
+        if (!inPlace) panel.Children.Add(error);
 
         var popup = new Popup
         {
@@ -122,32 +123,98 @@ public partial class MainWindow
             PlacementAnchor = PopupAnchor.TopLeft,
             PlacementGravity = PopupGravity.BottomRight,
             IsLightDismissEnabled = true,
-            Child = new Border { Child = panel, Padding = new Thickness(3), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(3) }
-                .Res(Border.BackgroundProperty, "PanelBrush").Res(Border.BorderBrushProperty, "AccentTextBrush"),
+            Child = inPlace
+                ? new Border { Child = panel, Background = Palette.Background }
+                : new Border { Child = panel, Padding = new Thickness(3), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(3) }
+                    .Res(Border.BackgroundProperty, "PanelBrush").Res(Border.BorderBrushProperty, "AccentTextBrush"),
         };
         CellEditorError = null;
+        var mainDoc = Editor.Document;
+        string originalLine = lineText;
+        string committed = original;
+        bool liveChanged = false;
+        long quietScrollUntil = 0;
+        // In place: the whole edit is one undo step (each change is written into the row as it is typed).
+        if (inPlace) mainDoc.UndoStack.StartUndoGroup();
 
         bool saved = false, cancelled = false;
         // Saves; false when the text cannot be written without breaking the table (the editor stays open and says why).
         bool Save()
         {
             if (saved || cancelled) return true;
-            if (editor.Document.Text == original) { saved = true; return true; } // unchanged (keeps the <br> as written)
-            var problem = CommitCell(lineNumber, cellIndex, editor.Document.Text);
-            if (problem is null) { saved = true; return true; }
+            if (!Write(editor.Document.Text)) return false;
+            saved = true;
+            return true;
+        }
+
+        // Writes the cell's text into the row; the text as it was puts the row back exactly (keeps <br/> as written).
+        bool Write(string text)
+        {
+            if (text == committed) return true;
+            if (text == original)
+            {
+                // Only the part that differs (replacing the whole line would move the caret to its end: the last cell).
+                var l = mainDoc.GetLineByNumber(lineNumber);
+                string now = mainDoc.GetText(l);
+                if (now != originalLine) ReplaceChangedPart(mainDoc, l.Offset, now, originalLine);
+                committed = text;
+                KeepCaretInCell();
+                return true;
+            }
+            var problem = CommitCell(lineNumber, cellIndex, text);
+            if (problem is null)
+            {
+                committed = text;
+                liveChanged = true;
+                CellEditorError = null;
+                error.IsVisible = false;
+                KeepCaretInCell();
+                return true;
+            }
             CellEditorError = Loc.T(problem);
             error.Text = CellEditorError;
             error.IsVisible = true;
+            SetStatusMessage(CellEditorError);
             return false;
         }
 
-        EventHandler scrolled = (_, _) => { if (popup.IsOpen) popup.IsOpen = false; };
+        // The edited cell stays the current one whatever the writes did to the main caret.
+        void KeepCaretInCell()
+        {
+            if (view.Model.TableAtLine(lineNumber - 1)?.RowAtLine(lineNumber - 1) is not { } r || cellIndex >= r.Cells.Count) return;
+            var l = mainDoc.GetLineByNumber(lineNumber);
+            int column = Editor.CaretOffset - l.Offset;
+            var c = r.Cells[cellIndex];
+            if (Editor.CaretOffset >= l.Offset && column >= c.Start && column <= c.End) return;
+            Editor.CaretOffset = l.Offset + c.ContentStart(mainDoc.GetText(l));
+        }
+
+        // In place: the row follows the typing; the editor follows the cell (its column can get wider).
+        void Live()
+        {
+            if (!popup.IsOpen || saved || cancelled) return;
+            quietScrollUntil = Environment.TickCount64 + 500;
+            if (!Write(editor.Document.Text)) return;
+            Editor.TextArea.TextView.EnsureVisualLines();
+            if (view.CellRect(lineNumber, cellIndex) is { } now) popup.PlacementRect = Place(now);
+            if (view.Model.TableAtLine(lineNumber - 1) is { } t && view.GridLayout(t) is { } grid && cellIndex < grid.Widths.Length)
+                editor.Width = GridCellEditorSize(editor.Document.Text, grid.Widths[cellIndex]).Width;
+        }
+        if (inPlace) editor.TextChanged += (_, _) => Dispatcher.UIThread.Post(Live, DispatcherPriority.Background);
+
+        EventHandler scrolled = (_, _) => { if (popup.IsOpen && Environment.TickCount64 > quietScrollUntil) popup.IsOpen = false; };
         Editor.TextArea.TextView.ScrollOffsetChanged += scrolled;
         popup.Closed += (_, _) =>
         {
             Editor.TextArea.TextView.ScrollOffsetChanged -= scrolled;
             // Clicking elsewhere saves, like in a spreadsheet; if that is impossible, the edit is dropped and reported.
             if (!saved && !cancelled && !Save()) SetStatusMessage(Loc.T("Table.CellNotSaved", CellEditorError ?? ""));
+            if (inPlace)
+            {
+                mainDoc.UndoStack.EndUndoGroup();
+                // Esc: the row as it was before the edit (undoing the live changes, as one step).
+                if (cancelled && liveChanged && mainDoc.UndoStack.CanUndo) mainDoc.UndoStack.Undo();
+            }
             cellView.Dispose();
             if (ReferenceEquals(_cellPopup, popup)) { _cellPopup = null; _cellEditor = null; }
         };
@@ -203,7 +270,8 @@ public partial class MainWindow
             {
                 var tv = editor.TextArea.TextView;
                 tv.EnsureVisualLines();
-                double wanted = tv.DocumentHeight + tv.DefaultLineHeight + editor.Padding.Top + editor.Padding.Bottom + 2;
+                // Just the text: the row grows with it (it is written through), so no spare line is needed.
+                double wanted = tv.DocumentHeight + editor.Padding.Top + editor.Padding.Bottom + 2;
                 editor.Height = Math.Min(maxHeight, wanted);
                 editor.VerticalScrollBarVisibility = wanted > maxHeight
                     ? Avalonia.Controls.Primitives.ScrollBarVisibility.Auto : Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled;
@@ -218,21 +286,46 @@ public partial class MainWindow
         popup.IsOpen = true;
         editor.Focus();
         editor.TextArea.Focus();
-        editor.SelectAll();
+        if (shownOffset is int shown) editor.CaretOffset = EditorOffsetOfShown(editor.Document, cellView, shown);
+        else editor.SelectAll();
+    }
+
+    /// <summary>The offset in the cell editor's text of the <paramref name="shown"/>-th shown character (markup hidden).</summary>
+    private static int EditorOffsetOfShown(TextDocument doc, MarkdownView view, int shown)
+    {
+        int count = 0;
+        foreach (var line in doc.Lines)
+        {
+            var render = view.RenderFor(line);
+            for (int col = 0; col < line.Length; col++)
+            {
+                if (render.IsHidden(col)) continue;
+                if (count == shown) return line.Offset + col;
+                count++;
+            }
+            if (count == shown) return line.EndOffset;
+            count++; // the line break
+        }
+        return doc.TextLength;
     }
 
     /// <summary>
     /// The cell editor's size: at least the cell, wider for long text, and tall enough for the whole text plus room
     /// to type, so that a scroll bar is needed only for very long cells (more than most of the window).
     /// </summary>
-    /// <summary>The cell editor over a grid cell: exactly the cell's text columns wide, the text's height plus a line.</summary>
+    /// <summary>The cell editor over a grid cell: exactly the cell's text columns wide, as tall as the text.</summary>
     internal (double Width, double Height) GridCellEditorSize(string text, int columns)
     {
         var tv = Editor.TextArea.TextView;
         double charWidth = Math.Max(1, tv.WideSpaceWidth), lineHeight = tv.DefaultLineHeight;
         // Room for exactly `columns` characters (half a character more, so the last one does not wrap) and the padding.
-        double width = (columns + 0.5) * charWidth + 4 * 2;
-        double height = (WrappedLineCount(text, Math.Max(1, columns)) + 1) * lineHeight + 2 * 2 + 2;
+        // Spaces just typed after the text are not in the column yet (the cell's width ignores them): room for them
+        // too, or each space would wrap to the next line until the next character is typed.
+        int shown = columns;
+        foreach (var para in text.Split('\n'))
+            if (para.TrimEnd(' ').Length <= columns) shown = Math.Max(shown, para.Length);
+        double width = (shown + 0.5) * charWidth + 4 * 2;
+        double height = WrappedLineCount(text, Math.Max(1, columns)) * lineHeight + 2 * 2 + 2;
         return (width, height);
     }
 
@@ -272,6 +365,60 @@ public partial class MainWindow
         return Math.Max(1, count);
     }
 
+    /// <summary>
+    /// On a grid row, like in a spreadsheet: Left / Right go to the neighbouring cell (stopping at the row's edge),
+    /// Up / Down to the same cell of the row above / below (past the table's edge: the line before / after it), and
+    /// Enter edits the current cell. False when the caret is not on a grid row.
+    /// </summary>
+    private bool HandleGridKey(Key key)
+    {
+        if (_markdown is not { TablesAsGrid: true } view || view.CaretGridRow is not { } line || view.CurrentCell is not { } current
+            || view.Model.TableAtLine(line.LineNumber - 1) is not { } table) return false;
+        if (Editor.SelectionLength > 0) Editor.TextArea.ClearSelection();
+        int row = line.LineNumber - 1 - table.FirstLine;
+        if (row < 0 || row >= table.Rows.Count) return false;
+        var doc = Editor.Document;
+        void GoTo(int r, int cell)
+        {
+            var l = doc.GetLineByNumber(table.FirstLine + r + 1);
+            var cells = table.Rows[r].Cells;
+            cell = Math.Clamp(cell, 0, cells.Count - 1);
+            Editor.CaretOffset = l.Offset + cells[cell].ContentStart(doc.GetText(l));
+            Editor.TextArea.Caret.BringCaretToView();
+        }
+        switch (key)
+        {
+            case Key.Enter:
+                if (Editor.IsReadOnly) return false;
+                EditTableCell(current.Line, current.Cell);
+                return true;
+            case Key.Left when current.Cell > 0:
+                GoTo(row, current.Cell - 1);
+                return true;
+            case Key.Right when current.Cell < table.Rows[row].Cells.Count - 1:
+                GoTo(row, current.Cell + 1);
+                return true;
+            default:
+                // Left / Right at the row's edge: the last / first cell of the previous / next row.
+                bool horizontal = key is Key.Left or Key.Right;
+                int step = key is Key.Up or Key.Left ? -1 : 1, target = row + step;
+                while (target >= 0 && target < table.Rows.Count && table.Rows[target].Kind == MdLineKind.TableSeparator) target += step;
+                if (target >= 0 && target < table.Rows.Count && table.Rows[target].Cells.Count > 0)
+                {
+                    GoTo(target, horizontal ? (step < 0 ? int.MaxValue : 0) : current.Cell);
+                    return true;
+                }
+                // Out of the table: the start of the line before / after it, if there is one.
+                int outside = step < 0 ? table.FirstLine : table.FirstLine + table.Rows.Count + 1;
+                if (outside >= 1 && outside <= doc.LineCount)
+                {
+                    Editor.CaretOffset = doc.GetLineByNumber(outside).Offset;
+                    Editor.TextArea.Caret.BringCaretToView();
+                }
+                return true;
+        }
+    }
+
     private void MoveToCell(int lineNumber, int cellIndex, bool backwards)
     {
         if (_markdown?.Model.TableAtLine(lineNumber - 1) is not { } table) { Editor.Focus(); return; }
@@ -290,6 +437,16 @@ public partial class MainWindow
         Dispatcher.UIThread.Post(() => EditTableCell(target, cell), DispatcherPriority.Background);
     }
 
+    /// <summary>Replaces only the part of a line (at <paramref name="offset"/>) that differs between the two texts.</summary>
+    private static void ReplaceChangedPart(TextDocument doc, int offset, string text, string updated)
+    {
+        int prefix = 0;
+        while (prefix < text.Length && prefix < updated.Length && text[prefix] == updated[prefix]) prefix++;
+        int suffix = 0;
+        while (suffix < text.Length - prefix && suffix < updated.Length - prefix && text[^(suffix + 1)] == updated[^(suffix + 1)]) suffix++;
+        doc.Replace(offset + prefix, text.Length - prefix - suffix, updated[prefix..(updated.Length - suffix)]);
+    }
+
     /// <summary>Writes the cell's new Markdown into the source; returns the message key of a problem, or null.</summary>
     private string? CommitCell(int lineNumber, int cellIndex, string edited)
     {
@@ -306,11 +463,7 @@ public partial class MainWindow
         string updated = result.NewLine!;
         if (updated == text) return null;
         // Replace only the part of the line that differs (keeps the caret, bookmarks and the undo step small).
-        int prefix = 0;
-        while (prefix < text.Length && prefix < updated.Length && text[prefix] == updated[prefix]) prefix++;
-        int suffix = 0;
-        while (suffix < text.Length - prefix && suffix < updated.Length - prefix && text[^(suffix + 1)] == updated[^(suffix + 1)]) suffix++;
-        doc.Replace(line.Offset + prefix, text.Length - prefix - suffix, updated[prefix..(updated.Length - suffix)]);
+        ReplaceChangedPart(doc, line.Offset, text, updated);
         return null;
     }
 }

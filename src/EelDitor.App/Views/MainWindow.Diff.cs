@@ -35,8 +35,10 @@ public partial class MainWindow
         view.SyncScroll = _settings.DiffSyncScroll;
         view.SyncScrollChanged += on => { _settings.DiffSyncScroll = on; RefreshCommandStates(); };
         view.WordMode = _settings.DiffWordMode;
-        view.WordModeChanged += on => { _settings.DiffWordMode = on; RefreshCommandStates(); };
+        // The word view shows both versions in one text: the panel with the current line of each side is not needed.
+        view.WordModeChanged += on => { _settings.DiffWordMode = on; DiffLineHost.IsVisible = !on; RefreshCommandStates(); };
         _diffView = view;
+        UpdateDocumentHeader();
         Editor.IsVisible = false;
         EditorHost.Children.Add(view);
 
@@ -47,7 +49,7 @@ public partial class MainWindow
         view.CurrentLineChanged += () => linePanel.Show(view);
         _diffLinePanel = linePanel;
         DiffLineHost.Child = linePanel;
-        DiffLineHost.IsVisible = true;
+        DiffLineHost.IsVisible = !view.WordMode;
         linePanel.Show(view);
         UpdateDiffTools();
         RefreshCommandStates();
@@ -60,6 +62,7 @@ public partial class MainWindow
         bool sameDoc = ReferenceEquals(_diffView.RightEditor.Document, Editor.Document);
         EditorHost.Children.Remove(_diffView);
         _diffView = null;
+        UpdateDocumentHeader();
         _diffLinePanel = null;
         DiffLineHost.Child = null;
         DiffLineHost.IsVisible = false;

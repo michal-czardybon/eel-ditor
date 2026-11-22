@@ -269,6 +269,20 @@ public partial class MainWindow
         };
     }
 
+    /// <summary>
+    /// Closing a file by hand (Ctrl+W, ✕, the file's menu, a middle click): when the file is being compared, the first
+    /// close ends the comparison and only the next one closes the file, so closing the diff never closes the file.
+    /// </summary>
+    private void CloseByUser(EditorDocument doc)
+    {
+        if (_diffView is not null && ReferenceEquals(doc, _active))
+        {
+            CloseDiff();
+            return;
+        }
+        _ = CloseDocumentAsync(doc);
+    }
+
     private async Task CloseDocumentAsync(EditorDocument doc, bool force = false)
     {
         if (!force && !await ConfirmCloseAsync(doc)) return;

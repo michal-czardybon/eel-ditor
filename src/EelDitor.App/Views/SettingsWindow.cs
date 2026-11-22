@@ -26,6 +26,7 @@ public sealed class SettingsWindow : Window
     public SettingsWindow(AppSettings s)
     {
         Title = Loc.T("Menu.Settings.Open");
+        this.Res(BackgroundProperty, "ChromeBrush"); // the window grey, not the theme's near-black
         Width = 600;
         SizeToContent = SizeToContent.Height;
         CanResize = false;
@@ -35,9 +36,7 @@ public sealed class SettingsWindow : Window
         var theme = new ComboBox { ItemsSource = new[] { Loc.T("Menu.View.ThemeDark"), Loc.T("Menu.View.ThemeSystem"), Loc.T("Menu.View.ThemeLight") }, SelectedIndex = (int)s.Theme, HorizontalAlignment = HorizontalAlignment.Stretch };
         var language = new ComboBox { ItemsSource = Loc.Languages.Select(l => l.Name).ToList(), SelectedIndex = Math.Max(0, Loc.Languages.ToList().FindIndex(l => l.Code == s.Language)), HorizontalAlignment = HorizontalAlignment.Stretch };
         _fontSize = new NumericUpDown { Value = (decimal)s.FontSize, Minimum = 6, Maximum = 48, Increment = 1, FormatString = "0", HorizontalAlignment = HorizontalAlignment.Left, Width = 110 };
-        var tabSize = new NumericUpDown { Value = s.TabSize, Minimum = 1, Maximum = 16, Increment = 1, FormatString = "0", HorizontalAlignment = HorizontalAlignment.Left, Width = 110 };
-        var spaces = new CheckBox { Content = Loc.T("Indent.UseSpaces"), IsChecked = s.UseSpaces };
-        var autoReload = new CheckBox { Content = Loc.T("Menu.Settings.AutoReload"), IsChecked = s.AutoReloadUnmodified };
+        // Tab width, spaces and automatic reload are not here: they are in the Settings menu (one place each).
         var threshold = new NumericUpDown { Value = s.LargeFileThresholdMb, Minimum = 1, Maximum = 2048, Increment = 5, FormatString = "0", HorizontalAlignment = HorizontalAlignment.Left, Width = 110 };
 
         // Font: installed fonts, monospaced only unless asked; each shown in its own face, with a live preview.
@@ -82,10 +81,7 @@ public sealed class SettingsWindow : Window
         Row(Loc.T("Settings.Language"), language);
         Row(Loc.T("Settings.Font"), fontPanel);
         Row(Loc.T("Settings.FontSize"), _fontSize);
-        Row(Loc.T("Settings.TabSize"), tabSize);
-        Row("", spaces);
         Row(Loc.T("Settings.LargeFile"), largePanel);
-        Row("", autoReload);
 
         var ok = new Button { Content = Loc.T("Button.Ok"), MinWidth = 90, IsDefault = true, HorizontalContentAlignment = HorizontalAlignment.Center };
         ok.Classes.Add("accent");
@@ -98,10 +94,7 @@ public sealed class SettingsWindow : Window
             s.Language = newLang;
             if (Selected is { } f) s.FontFamily = f.Name;
             s.FontSize = (double)(_fontSize.Value ?? 13);
-            s.TabSize = (int)(tabSize.Value ?? 4);
-            s.UseSpaces = spaces.IsChecked == true;
             s.LargeFileThresholdMb = (int)(threshold.Value ?? 10);
-            s.AutoReloadUnmodified = autoReload.IsChecked == true;
             Saved = true;
             Close();
         };

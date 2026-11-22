@@ -41,12 +41,20 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
     /// <summary>Something is selected (not just a click).</summary>
     public bool HasSelection => Anchor is { } a && Active is { } b && a != b;
 
+    /// <summary>Redraws the selection: the text highlight (below the text) and the cell frames (above it).</summary>
+    private void Invalidate()
+    {
+        var tv = _view.Editor.TextArea.TextView;
+        tv.InvalidateLayer(Layer);
+        _view.InvalidateCellFrames();
+    }
+
     public void Clear()
     {
         if (Anchor is null) return;
         Anchor = Active = null;
         _dragging = false;
-        _view.Editor.TextArea.TextView.InvalidateLayer(Layer);
+        Invalidate();
     }
 
     /// <summary>Selects from <paramref name="anchor"/> to <paramref name="active"/> (tests and the mouse).</summary>
@@ -54,7 +62,7 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
     {
         Anchor = anchor;
         Active = active;
-        _view.Editor.TextArea.TextView.InvalidateLayer(Layer);
+        Invalidate();
     }
 
     private TableRowElement? RowElement(VisualLine? visual) =>
@@ -173,7 +181,7 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
     public IDisposable KeepWhileStyling()
     {
         _keep++;
-        return new Release(() => { _keep--; _view.Editor.TextArea.TextView.InvalidateLayer(Layer); });
+        return new Release(() => { _keep--; Invalidate(); });
     }
 
     private sealed class Release(Action action) : IDisposable
@@ -284,25 +292,7 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
                 drawingContext.FillRectangle(_view.Palette.Selection, new Rect(x0 + column * cw, y0 + line * lh, Math.Max(width, 1) * cw, lh));
         }
         if (InCell is { } c) { Paint(c.Line, el => el.Spans(c.Cell, c.From, c.To)); return; }
-        if (Block is not { } block) return;
-        // Several cells: each one is outlined (the text stays readable, and its styles visible).
-        var pen = new Pen(_view.Palette.Accent, 1.5);
-        foreach (int n in block.Lines)
-        {
-            var visual = textView.GetVisualLine(n);
-            if (RowElement(visual) is not { } el) continue;
-            int firstText = el.Lines.FindIndex(l => l.Cells is not null), lastText = el.Lines.FindLastIndex(l => l.Cells is not null);
-            if (firstText < 0) continue;
-            double x0 = visual!.GetVisualPosition(0, VisualYPosition.LineTop).X - textView.ScrollOffset.X;
-            double y0 = visual.VisualTop - textView.ScrollOffset.Y;
-            for (int i = block.FirstCell; i <= block.LastCell && i < el.Layout.Widths.Length; i++)
-            {
-                double left = x0 + (TableWrap.BorderAt(el.Layout.Widths, i) + 0.5) * cw;
-                double right = x0 + (TableWrap.BorderAt(el.Layout.Widths, i + 1) + 0.5) * cw;
-                var rect = new Rect(left, y0 + firstText * lh, Math.Max(0, right - left), (lastText - firstText + 1) * lh);
-                drawingContext.DrawRectangle(null, pen, rect.Deflate(0.75), 2, 2);
-            }
-        }
+        // Several selected cells are outlined by CurrentCellRenderer (above the text, on the grid's lines).
     }
 
     public void Dispose()
