@@ -157,6 +157,34 @@ public static class TableWrap
         return (sb.ToString(), styles.ToArray());
     }
 
+    /// <summary>
+    /// For every character of <see cref="StyledCellText"/>, the column in the source line it comes from (a
+    /// <c>&lt;br&gt;</c>'s new line maps to the tag), so a range of the shown text can be turned into a source range.
+    /// </summary>
+    public static List<int> ShownToSource(string line, TableCell cell, LineRender render)
+    {
+        int start = cell.ContentStart(line), end = cell.ContentEnd(line);
+        var map = new List<int>();
+        var shown = new StringBuilder();
+        for (int i = start; i < end; i++)
+        {
+            if (render.BreakAt(i) is { } br)
+            {
+                while (shown.Length > 0 && shown[^1] == ' ') { shown.Length--; map.RemoveAt(map.Count - 1); }
+                shown.Append('\n');
+                map.Add(i);
+                i = br.End - 1;
+                SkipSpaces(line, ref i, end);
+                continue;
+            }
+            if (render.IsHidden(i)) continue;
+            if (line[i] == '\\' && i + 1 < end && line[i + 1] == '|') continue;
+            shown.Append(line[i]);
+            map.Add(i);
+        }
+        return map;
+    }
+
     private static void TrimEndSpaces(StringBuilder sb)
     {
         while (sb.Length > 0 && sb[^1] == ' ') sb.Length--;

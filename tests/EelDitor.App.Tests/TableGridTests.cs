@@ -128,7 +128,9 @@ public class TableGridTests
         var (w, doc) = OpenText("| a | b |\n|---|---|\n| find all | x |\n");
         w.EditTableCell(3, 0);
         Dispatcher.UIThread.RunJobs();
-        Assert.True(w.CellEditor!.Bounds.Width > 100 && w.CellEditor.Bounds.Height > 10, w.CellEditor.Bounds.ToString());
+        // As wide as the cell's text (8 characters): the text keeps the layout it has in the grid.
+        double cw = w.Editor.TextArea.TextView.WideSpaceWidth;
+        Assert.True(w.CellEditor!.Bounds.Width >= 8 * cw && w.CellEditor.Bounds.Width < 12 * cw && w.CellEditor.Bounds.Height > 10, w.CellEditor.Bounds.ToString());
         w.CellEditor!.Select(5, 3);
         Key(w, Avalonia.Input.Key.B, KeyModifiers.Control);
         Assert.Equal("find **all**", w.CellEditor!.Text);
@@ -208,7 +210,7 @@ public class TableGridTests
     }
 
     [AvaloniaFact]
-    public void CtrlB_WithTheCaretOnARow_BoldsTheWholeRow()
+    public void CtrlB_WithTheCaretOnARow_BoldsTheRow_OrInAGridTheCurrentCell()
     {
         foreach (bool wrap in new[] { false, true })
         {
@@ -223,11 +225,15 @@ public class TableGridTests
             while (!w.StartupCompleted && DateTime.UtcNow < until) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(10); }
             var doc = ((OpenFilesModel)w.DataContext!).Documents.Single(d => d.FilePath == path);
             w.Editor.CaretOffset = doc.Document.GetLineByNumber(3).Offset;    // before the first pipe
+            Dispatcher.UIThread.RunJobs();
             w.RunCommand("md.bold");
-            Assert.Contains("| **raz** | **dwa** |", doc.Document.Text);
+            // Text: the caret outside the cells means the whole row. Grid: the current cell (cells are the unit there).
+            Assert.Contains(wrap ? "| **raz** | dwa |" : "| **raz** | **dwa** |", doc.Document.Text);
             w.Editor.CaretOffset = doc.Document.GetLineByNumber(3).EndOffset; // after the last pipe: off again
+            Dispatcher.UIThread.RunJobs();
             w.RunCommand("md.bold");
-            Assert.Contains("| raz | dwa |", doc.Document.Text);
+            // Text: the whole row again, so off. Grid: the current cell is now the last one.
+            Assert.Contains(wrap ? "| **raz** | **dwa** |" : "| raz | dwa |", doc.Document.Text);
             AssertTableIntact(doc.Document.Text, 3, 2);
         }
     }

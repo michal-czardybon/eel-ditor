@@ -283,9 +283,15 @@ public partial class MainWindow
                 menu.Items.Add(new Separator());
                 menu.Items.Add(Item("md.table.editCell", track: false));
                 menu.Items.Add(new Separator());
+                // Styles act on the selected cells (or the current one).
+                var styles = Sub("Menu.Md.Style");
+                foreach (var id in new[] { "md.bold", "md.italic", "md.strike", "md.code", "md.highlight", "md.sub", "md.sup" }) styles.Items.Add(Item(id, track: false));
+                menu.Items.Add(styles);
+                menu.Items.Add(Item("md.clearFormat", track: false));
+                menu.Items.Add(new Separator());
                 foreach (var id in new[] { "md.table.rowUp", "md.table.rowDown", "md.table.colMoveLeft", "md.table.colMoveRight" }) menu.Items.Add(Item(id, track: false));
                 menu.Items.Add(new Separator());
-                foreach (var id in new[] { "md.table.selRow", "md.table.selCol", "md.table.copyCol", "md.table.format" }) menu.Items.Add(Item(id, track: false));
+                foreach (var id in new[] { "md.table.selRow", "md.table.selCol", "md.table.copyCol", "md.table.split", "md.table.format" }) menu.Items.Add(Item(id, track: false));
             }
             else if (InMarkdown)
             {
@@ -306,6 +312,8 @@ public partial class MainWindow
         Editor.TextArea.AddHandler(PointerPressedEvent, (_, e) =>
         {
             if (!e.GetCurrentPoint(Editor.TextArea).Properties.IsRightButtonPressed) return;
+            // A table drawn as a grid is one element per row: the clicked cell comes from the grid, not the text.
+            if (_markdown?.GridSelection.OnContextClick(e) == true) return;
             var pos = Editor.GetPositionFromPoint(e.GetPosition(Editor));
             if (pos is not { } p) return;
             int offset = Editor.Document.GetOffset(p.Location);

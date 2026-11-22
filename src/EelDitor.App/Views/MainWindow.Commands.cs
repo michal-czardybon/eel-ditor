@@ -95,6 +95,12 @@ public partial class MainWindow
     /// <summary>Copies the selection; in Markdown with its styles closed (no lone markers in the clipboard).</summary>
     private async Task CopyAsync()
     {
+        // Selected table cells (rows, a column, a block): Markdown rows and an HTML table (Word keeps it a table).
+        if (Editor.SelectionLength == 0 && SelectedCellBlock() is { } block)
+        {
+            await CopyCellsAsync(block);
+            return;
+        }
         // Text selected in a table drawn as a grid: the shown text.
         if (_markdown?.GridSelection.Text is { } shown && Clipboard is { } board)
         {
@@ -108,6 +114,11 @@ public partial class MainWindow
 
     private async Task CutAsync()
     {
+        if (Editor.SelectionLength == 0 && !Editor.IsReadOnly && SelectedCellBlock() is { } block)
+        {
+            await CutRowsAsync(block);
+            return;
+        }
         if (Editor.SelectionLength == 0 || Editor.IsReadOnly) return;
         if (_markdown is null) { Editor.Cut(); return; }
         await CopyAsync();
@@ -120,6 +131,9 @@ public partial class MainWindow
 
     /// <summary>Runs a command by id (tests).</summary>
     internal void RunCommand(string id) => _commands[id].Execute();
+
+    /// <summary>Whether a command is enabled now (tests).</summary>
+    internal bool CommandCanExecute(string id) => _commands[id].CanExecute?.Invoke() ?? true;
 
     private void Table(TableCommand c)
     {
@@ -165,6 +179,8 @@ public partial class MainWindow
         Add("md.table.selCol", "Menu.Md.Table.SelectColumn", () => SelectTablePart(column: true), ["Ctrl+Alt+Up"], () => InTable);
         Add("md.table.selRow", "Menu.Md.Table.SelectRow", () => SelectTablePart(column: false), ["Ctrl+Alt+Down"], () => InTable);
         Add("md.table.copyCol", "Menu.Md.Table.CopyColumn", () => _ = CopyTableColumnAsync(), null, () => InTable);
+        Add("md.table.split", "Menu.Md.Table.Split", () => Table(TableCommand.Split), null,
+            () => InTable && _markdown is not null && MarkdownCommands.TableAtCaret(Editor, _markdown) is var (_, r, _) && r >= 2, tooltipKey: "Menu.Md.Table.SplitTip");
         Add("md.table.format", "Menu.Md.Table.Format", () => Table(TableCommand.FormatInSource), null, () => InTable);
         // Lists (after the table commands: Ctrl+Enter in a table inserts a row).
         Add("md.list.itemAbove", "Menu.Md.List.ItemAbove", () => { if (_markdown is not null) MarkdownCommands.InsertListItem(Editor, _markdown, after: false); }, ["Ctrl+Shift+Enter"],
@@ -195,7 +211,7 @@ public partial class MainWindow
         // Windows also uses Ctrl+Insert, Shift+Delete and Shift+Insert for copy, cut and paste.
         Add("edit.cut", "Menu.Edit.Cut", () => _ = CutAsync(), ["Ctrl+X", "Shift+Delete"]);
         Add("edit.copy", "Menu.Edit.Copy", () => _ = CopyAsync(), ["Ctrl+C", "Ctrl+Insert"]);
-        Add("edit.paste", "Menu.Edit.Paste", () => Editor.Paste(), ["Ctrl+V", "Shift+Insert"]);
+        Add("edit.paste", "Menu.Edit.Paste", () => _ = PasteAsync(), ["Ctrl+V", "Shift+Insert"]);
         Add("edit.selectAll", "Menu.Edit.SelectAll", () => Editor.SelectAll(), ["Ctrl+A"]);
         Add("edit.duplicate", "Menu.Edit.Duplicate", DuplicateLines, ["Ctrl+D"]);
         Add("edit.deleteLine", "Menu.Edit.DeleteLine", DeleteLines, ["Ctrl+Shift+L", "Ctrl+L"]);
@@ -261,7 +277,7 @@ public partial class MainWindow
         Add("view.eol", "Menu.View.ShowEol", () => SetWhitespace(Editor.Options.ShowSpaces, !Editor.Options.ShowEndOfLine), null, () => true, () => Editor.Options.ShowEndOfLine);
         Add("view.allChars", "Menu.View.ShowAll", ToggleAllCharacters, ["Ctrl+Shift+8"], isChecked: () => Editor.Options.ShowSpaces && Editor.Options.ShowEndOfLine);
         Add("view.lineNumbers", "Menu.View.LineNumbers", ToggleLineNumbers, null, isChecked: () => Editor.ShowLineNumbers);
-        Add("view.currentLine", "Menu.View.CurrentLine", ToggleCurrentLine, null, isChecked: () => Editor.Options.HighlightCurrentLine);
+        Add("view.currentLine", "Menu.View.CurrentLine", ToggleCurrentLine, null, isChecked: () => _settings.HighlightCurrentLine);
         Add("view.sidebar", "Menu.View.Sidebar", ToggleSidebar, ["Ctrl+Shift+B", "Ctrl+Alt+L"], isChecked: () => MainGrid.ColumnDefinitions[0].Width.Value > 0);
         Add("view.results", "Menu.View.Results", ToggleResults, ["Ctrl+Shift+R", "Ctrl+Alt+R"], isChecked: () => ResultsHost.IsVisible);
         Add("view.zoomIn", "Menu.View.ZoomIn", () => Zoom(1), ["Ctrl+OemPlus", "Ctrl+Add"]);
@@ -440,7 +456,7 @@ public partial class MainWindow
                 Item("md.table.delRow"), Item("md.table.delCol"), Sep(),
                 Item("md.table.rowUp"), Item("md.table.rowDown"), Item("md.table.colMoveLeft"), Item("md.table.colMoveRight"), Sep(),
                 Item("md.table.selCol"), Item("md.table.selRow"), Item("md.table.copyCol"), Sep(),
-                Item("md.table.format")),
+                Item("md.table.split"), Item("md.table.format")),
             Sep(),
             Item("md.raw")));
 

@@ -137,13 +137,13 @@ public static class InlineParser
 
             char before = i > start ? line[i - 1] : ' ';
             char after = i + run < end ? line[i + run] : ' ';
-            bool leftFlanking = !char.IsWhiteSpace(after) && !(char.IsPunctuation(after) && !char.IsWhiteSpace(before) && !char.IsPunctuation(before));
-            bool rightFlanking = !char.IsWhiteSpace(before) && !(char.IsPunctuation(before) && !char.IsWhiteSpace(after) && !char.IsPunctuation(after));
+            bool leftFlanking = !char.IsWhiteSpace(after) && !(IsPunct(after) && !char.IsWhiteSpace(before) && !IsPunct(before));
+            bool rightFlanking = !char.IsWhiteSpace(before) && !(IsPunct(before) && !char.IsWhiteSpace(after) && !IsPunct(after));
             bool canOpen = leftFlanking, canClose = rightFlanking;
             if (c is '_' or '=') // no intra-word emphasis: a==b, snake_case
             {
-                canOpen = leftFlanking && (!rightFlanking || char.IsPunctuation(before));
-                canClose = rightFlanking && (!leftFlanking || char.IsPunctuation(after));
+                canOpen = leftFlanking && (!rightFlanking || IsPunct(before));
+                canClose = rightFlanking && (!leftFlanking || IsPunct(after));
             }
 
             int pos = i, remaining = run;
@@ -226,6 +226,12 @@ public static class InlineParser
         }
         return -1;
     }
+
+    /// <summary>
+    /// Punctuation as CommonMark (0.31) counts it for emphasis: Unicode punctuation and symbols, so "&lt;", "=", "+",
+    /// "|" count too (.NET's IsPunctuation leaves out symbols, and "**(a)**&lt;br&gt;" then did not close the bold).
+    /// </summary>
+    private static bool IsPunct(char c) => char.IsPunctuation(c) || char.IsSymbol(c);
 
     private static int CountRun(string s, int i, int end, char c)
     {

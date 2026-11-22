@@ -93,8 +93,13 @@ public sealed partial class MarkdownDocument
                     if (row.Kind != MdLineKind.TableSeparator)
                     {
                         foreach (var cell in row.Cells)
+                        {
+                            // A header cell is bold as a whole (as the grid draws it), not only its styled parts.
+                            if (row.Kind == MdLineKind.TableHeader && cell.ContentEnd(rowText) > cell.ContentStart(rowText))
+                                render.Styles.Add(new StyledRange(cell.ContentStart(rowText), cell.ContentEnd(rowText), MdStyle.Bold));
                             InlineParser.Parse(rowText, cell.Start, cell.End, render,
                                 row.Kind == MdLineKind.TableHeader ? MdStyle.Bold : MdStyle.None);
+                        }
                     }
                     lines[row.LineIndex] = render;
                 }

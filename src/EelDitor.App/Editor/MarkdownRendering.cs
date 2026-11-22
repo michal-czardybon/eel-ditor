@@ -42,7 +42,6 @@ public sealed class MarkdownView : IDisposable
     private readonly RuleGenerator _rules;
     private readonly RuleRenderer _ruleRenderer;
     private readonly LineHeightPrimer _primer;
-    private readonly GridRowCaretRenderer _rowCaret;
     private readonly LongLineGenerators _longLines;
     private readonly GridTextSelection _gridSelection;
     private readonly IBrush? _caretBrush;
@@ -83,9 +82,8 @@ public sealed class MarkdownView : IDisposable
         // On a table row drawn as a grid the caret would be as tall as the row: it is hidden and the row is
         // outlined instead.
         _caretBrush = editor.TextArea.Caret.CaretBrush;
-        _rowCaret = new GridRowCaretRenderer(this);
-        tv.BackgroundRenderers.Add(_rowCaret);
         _document.Changed += OnDocumentChanged;
+        _document.UpdateFinished += OnUpdateFinished;
         editor.TextArea.AddHandler(InputElement.PointerPressedEvent, OnPointerPressed, RoutingStrategies.Tunnel);
         editor.TextArea.TextEntering += OnTextEntering;
         editor.TextArea.TextEntered += OnTextEntered;
@@ -137,6 +135,30 @@ public sealed class MarkdownView : IDisposable
         if (e.Property == TextEditor.WordWrapProperty) UpdateGridCaret();
     }
 
+    /// <summary>The column or row selected in a table shown as text (Select column / row), as source ranges.</summary>
+    internal Func<IReadOnlyList<CellRange>>? TextModeCellRanges { get; set; }
+
+    /// <summary>
+    /// Selected table cells as source ranges (line number, start, end), when cells rather than text are selected: the
+    /// grid's selection, or Select column / row in a table shown as text. Null when there is none.
+    /// </summary>
+    internal List<(int Line, int Start, int End)>? CellSelectionPieces()
+    {
+        if (TablesAsGrid) return _gridSelection.SourcePieces();
+        if (TextModeCellRanges?.Invoke() is not { Count: > 0 } ranges) return null;
+        var pieces = new List<(int, int, int)>();
+        foreach (var r in ranges)
+        {
+            if (Model.GetLine(r.Line).Kind == MdLineKind.TableSeparator || r.Line + 1 > _document.LineCount) continue;
+            string text = _document.GetText(_document.GetLineByNumber(r.Line + 1));
+            int s = r.Start, e = Math.Min(r.End, text.Length);
+            while (s < e && text[s] is ' ' or '\t') s++;
+            while (e > s && text[e - 1] is ' ' or '\t') e--;
+            if (e > s) pieces.Add((r.Line + 1, s, e));
+        }
+        return pieces;
+    }
+
     /// <summary>The selection of shown text in tables drawn as grids.</summary>
     internal GridTextSelection GridSelection => _gridSelection;
 
@@ -164,8 +186,48 @@ public sealed class MarkdownView : IDisposable
         {
             _caretHidden = hide;
             _editor.TextArea.Caret.CaretBrush = hide ? Brushes.Transparent : _caretBrush;
+            // The current-line band would cover the whole grid row with its bottom border (and so look shifted down);
+            // the current cell is highlighted instead.
+            if (hide) { _highlightLine = _editor.Options.HighlightCurrentLine; _editor.Options.HighlightCurrentLine = false; }
+            else if (_highlightLine is { } restore) { _editor.Options.HighlightCurrentLine = restore; _highlightLine = null; }
+        }
+        // The current cell is drawn by its row (exactly where the grid is): rebuild the rows that change.
+        var current = CaretGridRow is { } row ? (row.LineNumber, CellAtCaret(row)) : ((int, int)?)null;
+        if (current != _currentCell)
+        {
+            var tv = _editor.TextArea.TextView;
+            foreach (var n in new[] { _currentCell?.Line, current?.Item1 })
+                if (n is int number && number <= _document.LineCount) tv.Redraw(_document.GetLineByNumber(number));
+            _currentCell = current;
         }
         _editor.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
+    }
+
+    private (int Line, int Cell)? _currentCell;
+
+    /// <summary>The user's current-line highlight, turned off while the caret is on a grid row; null when not changed.</summary>
+    private bool? _highlightLine;
+
+    /// <summary>The user's choice of the current-line band (applied now, or when the caret leaves a grid row).</summary>
+    internal void SetCurrentLineHighlight(bool on)
+    {
+        if (_highlightLine is not null) _highlightLine = on;
+        else _editor.Options.HighlightCurrentLine = on;
+    }
+
+    /// <summary>The cell of a grid row the caret is in (by its column in the source), for drawing; null on other rows.</summary>
+    internal int? CurrentCellOf(DocumentLine line) => _currentCell is { } c && c.Line == line.LineNumber ? c.Cell : null;
+
+    /// <summary>The current cell (line number, cell index), or null when the caret is not on a grid row.</summary>
+    internal (int Line, int Cell)? CurrentCell => _currentCell;
+
+    private int CellAtCaret(DocumentLine line)
+    {
+        if (Model.TableAtLine(line.LineNumber - 1)?.RowAtLine(line.LineNumber - 1) is not { Cells.Count: > 0 } row) return 0;
+        int column = Math.Clamp(_editor.CaretOffset - line.Offset, 0, line.Length);
+        for (int c = 0; c < row.Cells.Count; c++)
+            if (column <= row.Cells[c].End) return c;
+        return row.Cells.Count - 1;
     }
 
     /// <summary>
@@ -415,7 +477,11 @@ public sealed class MarkdownView : IDisposable
         if (!e.GetCurrentPoint(_editor.TextArea).Properties.IsLeftButtonPressed) return;
         if (e.ClickCount == 2 && GridCellAt(e) is { } cell && Model.TableAtLine(cell.Line - 1)?.RowAtLine(cell.Line - 1)?.Kind != MdLineKind.TableSeparator)
         {
-            _editor.TextArea.Caret.Offset = _document.GetLineByNumber(cell.Line).Offset;
+            // The caret goes into the edited cell's text, so that cell stays the current one.
+            var line = _document.GetLineByNumber(cell.Line);
+            int column = Model.TableAtLine(cell.Line - 1)?.RowAtLine(cell.Line - 1) is { } row && cell.Cell < row.Cells.Count
+                ? row.Cells[cell.Cell].ContentStart(_document.GetText(line)) : 0;
+            _editor.TextArea.Caret.Offset = line.Offset + column;
             CellEditRequested?.Invoke(cell.Line, cell.Cell);
             e.Handled = true;
             return;
@@ -468,7 +534,26 @@ public sealed class MarkdownView : IDisposable
 
     public DocumentLineSource Source { get; }
 
-    public MarkdownDocument Model { get; private set; }
+    private MarkdownDocument _model = null!;
+    private bool _modelStale;
+
+    /// <summary>
+    /// The display model, reparsed lazily after changes: a command that changes 800 table rows in one update parses
+    /// the document once, not 800 times (which froze the editor for seconds, and as long again on undo).
+    /// </summary>
+    public MarkdownDocument Model
+    {
+        get
+        {
+            if (_modelStale)
+            {
+                _modelStale = false;
+                _model = MarkdownDocument.Parse(Source);
+            }
+            return _model;
+        }
+        private set { _model = value; _modelStale = false; }
+    }
 
     public event EventHandler? ModelChanged;
 
@@ -478,17 +563,44 @@ public sealed class MarkdownView : IDisposable
         set { _colorizer.Palette = value; _editor.TextArea.TextView.Redraw(); }
     }
 
+    // Lines (1-based) changed since the display was last brought up to date; -1 when none.
+    private int _changedFrom = -1, _changedTo = -1;
+
     private void OnDocumentChanged(object? sender, DocumentChangeEventArgs e)
     {
-        // Markdown files are small enough to reparse on every change; this keeps rendering exact.
-        Model = MarkdownDocument.Parse(Source);
+        _modelStale = true;
+        int first = _document.GetLineByOffset(Math.Min(e.Offset, _document.TextLength)).LineNumber;
+        int last = _document.GetLineByOffset(Math.Min(e.Offset + e.InsertionLength, _document.TextLength)).LineNumber;
+        _changedFrom = _changedFrom < 0 ? first : Math.Min(_changedFrom, first);
+        _changedTo = Math.Max(_changedTo, last);
+        // Inside an update (a command, undo, redo) the rest waits until it ends: once for all its changes.
+        if (!_document.IsInUpdate) AfterChanges();
+    }
+
+    private void OnUpdateFinished(object? sender, EventArgs e)
+    {
+        if (_changedFrom >= 0) AfterChanges();
+    }
+
+    /// <summary>Brings the display up to date with the changed text (once per edit or per update).</summary>
+    private void AfterChanges()
+    {
+        if (_disposed) return;
+        int from = Math.Min(_changedFrom, _document.LineCount), to = Math.Min(Math.Max(_changedTo, from), _document.LineCount);
+        _changedFrom = _changedTo = -1;
         ClearPendingStyle();
         UpdateGridCaret();
         ModelChanged?.Invoke(this, EventArgs.Empty);
         _editor.TextArea.TextView.Redraw();
         // An edited table can change the column widths, and so the height of rows out of view.
-        if (TablesAsGrid && Model.TableAtLine(_document.GetLineByOffset(Math.Min(e.Offset, _document.TextLength)).LineNumber - 1) is { } table)
-            _primer.Lines(table.FirstLine + 1, table.LastLine + 1);
+        if (!TablesAsGrid || from < 1) return;
+        var measured = new HashSet<int>();
+        for (int n = from; n <= to; n++)
+            if (Model.TableAtLine(n - 1) is { } table && measured.Add(table.FirstLine))
+            {
+                _primer.Lines(table.FirstLine + 1, table.LastLine + 1);
+                n = table.LastLine + 1;
+            }
     }
 
     public LineRender RenderFor(DocumentLine line) => Model.GetLine(line.LineNumber - 1);
@@ -503,6 +615,7 @@ public sealed class MarkdownView : IDisposable
     {
         _disposed = true;
         _document.Changed -= OnDocumentChanged;
+        _document.UpdateFinished -= OnUpdateFinished;
         _editor.TextArea.Caret.PositionChanged -= OnCaretPositionChanged;
         var tv = _editor.TextArea.TextView;
         _primer.Dispose();
@@ -510,8 +623,8 @@ public sealed class MarkdownView : IDisposable
         tv.PropertyChanged -= OnTextViewPropertyChanged;
         _editor.PropertyChanged -= OnEditorPropertyChanged;
         tv.ElementGenerators.Remove(_grid);
-        tv.BackgroundRenderers.Remove(_rowCaret);
         if (_caretHidden) _editor.TextArea.Caret.CaretBrush = _caretBrush;
+        if (_highlightLine is { } highlight) _editor.Options.HighlightCurrentLine = highlight;
 
         tv.ElementGenerators.Remove(_widgets);
         tv.ElementGenerators.Remove(_padding);
@@ -1015,28 +1128,10 @@ internal sealed class TableGridGenerator(MarkdownView view) : VisualLineElementG
             aligns.Add(c < _table.Alignments.Count ? _table.Alignments[c] : ColumnAlignment.None);
         }
         bool first = _row.LineIndex == _table.FirstLine, last = _row.LineIndex == _table.LastLine;
-        return new TableRowElement(_lineLength, layout, cells, aligns, _row.Kind, first, last, view.Palette);
+        return new TableRowElement(_lineLength, layout, cells, aligns, _row.Kind, first, last, view.Palette, view.CurrentCellOf(_line));
     }
 }
 
-/// <summary>Outlines the grid row the caret is on (its caret is hidden: it would be as tall as the row).</summary>
-internal sealed class GridRowCaretRenderer(MarkdownView view) : IBackgroundRenderer
-{
-    public KnownLayer Layer => KnownLayer.Background;
-
-    public void Draw(TextView textView, DrawingContext drawingContext)
-    {
-        if (view.CaretGridRow is not { } line || !textView.VisualLinesValid) return;
-        var visual = textView.GetVisualLine(line.LineNumber);
-        if (visual is null || visual.Elements.Count == 0 || visual.Elements[0] is not TableRowElement el) return;
-        double x = visual.GetVisualPosition(0, VisualYPosition.LineTop).X - textView.ScrollOffset.X;
-        double y = visual.VisualTop - textView.ScrollOffset.Y;
-        double width = TableWrap.GridWidth(el.Layout.Widths) * textView.WideSpaceWidth;
-        var rect = new Rect(x - 2, y, width + 4, visual.Height);
-        drawingContext.FillRectangle(view.Palette.CurrentLine, rect);
-        drawingContext.DrawRectangle(null, new Pen(view.Palette.Accent, 1.5), rect.Deflate(0.75), 2, 2);
-    }
-}
 
 /// <summary>One wrapped line of a cell: its text and the Markdown style of every character.</summary>
 internal sealed record StyledLine(string Text, MdStyle[] Styles);
@@ -1048,8 +1143,11 @@ internal sealed record GridCell(string Text, MdStyle[] Styles, List<(int Start, 
 }
 
 internal sealed class TableRowElement(int documentLength, TableGridLayout layout, List<GridCell> cells,
-    List<ColumnAlignment> aligns, MdLineKind kind, bool first, bool last, EditorPalette palette) : VisualLineElement(1, documentLength)
+    List<ColumnAlignment> aligns, MdLineKind kind, bool first, bool last, EditorPalette palette, int? currentCell = null) : VisualLineElement(1, documentLength)
 {
+    /// <summary>The cell the caret is in (highlighted), or null.</summary>
+    public int? CurrentCell { get; } = currentCell;
+
     private List<BoxLines.Line>? _lines;
 
     public TableGridLayout Layout { get; } = layout;
@@ -1111,7 +1209,7 @@ internal sealed class TableRowElement(int documentLength, TableGridLayout layout
     }
 
     public override TextRun CreateTextRun(int startVisualColumn, ITextRunConstructionContext context) =>
-        new TableRowRun(TextRunProperties, context.TextView.WideSpaceWidth, context.TextView.DefaultLineHeight, Lines, kind, palette);
+        new TableRowRun(TextRunProperties, context.TextView.WideSpaceWidth, context.TextView.DefaultLineHeight, Lines, kind, palette, Layout.Widths, CurrentCell);
 }
 
 /// <summary>
@@ -1166,7 +1264,7 @@ internal static class BoxLines
 }
 
 internal sealed class TableRowRun(TextRunProperties properties, double charWidth, double lineHeight, List<BoxLines.Line> lines,
-    MdLineKind kind, EditorPalette palette) : DrawableTextRun
+    MdLineKind kind, EditorPalette palette, int[]? widths = null, int? currentCell = null) : DrawableTextRun
 {
     public override TextRunProperties Properties { get; } = properties;
 
@@ -1180,6 +1278,20 @@ internal sealed class TableRowRun(TextRunProperties properties, double charWidth
         double size = Properties.FontRenderingEmSize;
         var culture = System.Globalization.CultureInfo.CurrentCulture;
         var bold = new Typeface(tf.FontFamily, tf.Style, FontWeight.Bold, tf.Stretch);
+        // The current cell: outlined here, by the run itself, so it lines up with the grid exactly.
+        if (currentCell is int cell && widths is not null && cell < widths.Length)
+        {
+            int firstText = lines.FindIndex(l => l.Cells is not null), lastText = lines.FindLastIndex(l => l.Cells is not null);
+            if (firstText >= 0)
+            {
+                double x0 = origin.X + (TableWrap.BorderAt(widths, cell) + 0.5) * charWidth;
+                double x1 = origin.X + (TableWrap.BorderAt(widths, cell + 1) + 0.5) * charWidth;
+                double y0 = origin.Y + firstText * lineHeight, y1 = origin.Y + (lastText + 1) * lineHeight;
+                var rect = new Rect(x0, y0, Math.Max(0, x1 - x0), Math.Max(0, y1 - y0));
+                // An outline only: a fill would hide the selection, which is drawn below the text.
+                context.DrawRectangle(null, new Pen(palette.Accent, 1.5), rect.Deflate(0.75), 2, 2);
+            }
+        }
         // Not the run's brush: the Markdown colorizer dims the pipes, which are part of this element.
         var textBrush = kind == MdLineKind.TableHeader ? palette.Accent : palette.Foreground;
         for (int i = 0; i < lines.Count; i++)

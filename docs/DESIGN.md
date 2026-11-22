@@ -101,6 +101,9 @@ user: task lists, images (local only), highlight `==…==`, footnotes, subscript
 tools and GitHub users write are read as styles: `<br>` (any form, a line break in table cells), `<sub>`, `<sup>`,
 `<s>`, `<del>`, `<mark>`; other HTML is plain text.
 
+**Emphasis rules** follow CommonMark 0.31, where punctuation includes symbols (`< > = + | ~ $ ^`): `**(a)**<br>`
+closes the bold (.NET's `char.IsPunctuation` alone does not count `<`).
+
 **Hidden markup.** Markers (`**`, `_`, `` ` ``, `#`, link targets) are replaced by `HiddenElement`s: zero width and
 **zero height** (a full-height empty element made lines taller and broke scroll height). The caret jumps over a
 marker as one unit. `WholeElement` keeps **one visual column per source character** so AvaloniaEdit's hit-testing
@@ -156,9 +159,35 @@ line) with text wrapped inside cells (`TableWrap`). ASCII-style borders were cho
 continuous version misaligned text in the first rows. Column widths: natural widths when they fit; otherwise narrow
 columns keep their width and wide ones share the rest.
 - A grid row is **not editable in place** (one source line ↔ many drawn lines). Editing goes through the cell editor
-  (double click / command). The caret on a grid row is hidden (`CaretBrush` transparent); the row is outlined instead.
+  (double click / command). The caret on a grid row is hidden (`CaretBrush` transparent) and **the current cell** — the
+  one whose source contains the caret — is outlined instead: cells are what operations act on (editing, Tab). A click
+  puts the caret into the clicked cell's text. The outline is drawn by the row's own run, not by a background renderer,
+  so it lines up with the grid exactly; the editor's current-line band is turned off on grid rows (it covers the whole
+  row element including its bottom border, which looked shifted down).
 - **Selecting text in a grid** is a separate display-only selection (`GridTextSelection`): drag inside one cell selects
   its shown text, across cells selects whole cells; Ctrl+C copies shown text (several cells: TSV, one line per row).
+  Select column / Select row use this selection in a grid (the source ranges the text mode highlights are not drawn there).
+- **Commands act on the selected cells.** Styles (Ctrl+B…, highlight), clear formatting and convert style apply to the
+  cells selected by Select column / row or by dragging in a grid (part of one cell maps back through the hidden
+  markup), and the selection stays, so the next command applies to the same cells. In a grid without a selection they
+  apply to the current cell. A header cell is bold as a whole in the model (as the grid draws it), so adding a style
+  there is not mistaken for a change of its boldness.
+- **Selected cells are outlined**, like the current cell, not highlighted: the text stays readable and its styles
+  visible. Part of one cell's text is highlighted as text.
+- **The cell editor in a grid lies exactly over the cell's text** and wraps at the cell's width, so the text keeps its
+  layout while edited; it is as tall as the text plus one line (measured after layout, growing while typing), so it
+  needs no scroll bar. In-place editing without an editor would need a caret, selection, input and IME of our own for
+  grid rows (AvaloniaEdit lays a line out as one flow of elements; cells side by side cannot be expressed), so it is
+  not done; the overlay is made to look in place instead.
+- **Clipboard:** copying selected cells puts Markdown rows (plain text; whole rows exactly as written, a header with a
+  separator) and an HTML table (Windows "HTML Format", others text/html) for Word and Excel. Pasting in a table inserts
+  rows above the current row (below the separator when on the header): from Markdown rows, an HTML table (Word, web)
+  or tab-separated text (Excel), fitted to the table's columns; outside a table a pasted HTML table becomes a new
+  Markdown table. Cut of whole body rows removes them. `TableClipboard` holds the conversions. A pasted table's first row becomes the
+  header only when the source marked it as one (`<th>`/`<thead>`, or a Markdown separator); otherwise the new table
+  gets an empty header and every pasted row stays a body row.
+- **Split table** (at a body row): a blank line ends the first table, the second starts with copies of the header and
+  the separator (column names and alignment stay).
   The document selection is not used because it can only take whole rows.
 
 **Structural edits — minimal diff** (`TableEditor`): new cell `|  |` (separator `| - |`), existing cells are never
@@ -288,6 +317,11 @@ diff-friendly mode.
 ---
 
 ## 11. Performance and startup
+
+- **The Markdown model is reparsed lazily**, once per edit or per document update (commands, undo, redo run inside
+  one update), not once per changed line: a column command on an 800-row table used to reparse 300 KB 800 times (and
+  freeze for seconds, also on undo). Commands that change many lines take their line parsers before the update and
+  never read the model inside it. A test keeps column commands on such a table under a few seconds.
 
 - Single-file executable (self-contained publish) + native splash shown before Avalonia starts; `Warmup` prepares
   non-UI objects (code pages, TextMate registry) on a background thread.

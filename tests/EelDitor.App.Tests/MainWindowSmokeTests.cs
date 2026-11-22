@@ -83,7 +83,7 @@ public class DiffInWindowTests
         b.Document.Text = "x\ny";
         w.Activate(a);
         Dispatcher.UIThread.RunJobs();
-        w.OpenDiff("HEAD", "a\nB\nc", "working", a.Document, true, @"C:x.cs");
+        w.OpenDiff("HEAD", "a\nB\nc", "working", a.Document, true, @"C:\x\a.cs");
         Dispatcher.UIThread.RunJobs();
         w.Activate(b);
         Dispatcher.UIThread.RunJobs();

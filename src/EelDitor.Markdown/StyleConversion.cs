@@ -172,8 +172,10 @@ public static class StyleConversion
         if (oldText != newText) return false;
         for (int i = 0; i < newStyles.Length; i++)
         {
-            var expected = i >= from && i < to ? oldStyles[i] & ~removed : oldStyles[i];
-            if (newStyles[i] != expected) return false;
+            // In the range only the removed style may change (it may stay where something else gives it, e.g. the
+            // bold of a table header); outside it nothing changes.
+            bool ok = i >= from && i < to ? (newStyles[i] & ~removed) == (oldStyles[i] & ~removed) : newStyles[i] == oldStyles[i];
+            if (!ok) return false;
         }
         return true;
     }

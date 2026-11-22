@@ -122,6 +122,24 @@ public static class TableEditor
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Splits the table above body row <paramref name="rowIndex"/>: a blank line ends the first table, and the second
+    /// one starts with copies of the header and the separator (the column names stay). Nothing on the header or the
+    /// separator.
+    /// </summary>
+    public static IReadOnlyList<TableEdit> Split(MarkdownTable table, ILineSource src, int rowIndex)
+    {
+        if (rowIndex < 2 || rowIndex >= table.Rows.Count) return [];
+        int line = table.Rows[rowIndex].LineIndex;
+        // Inserted before the same line, highest column first: they end up in the order blank, header, separator.
+        return
+        [
+            new TableEdit(TableEditKind.InsertLineBefore, line, Column: 0, Text: ""),
+            new TableEdit(TableEditKind.InsertLineBefore, line, Column: 1, Text: src.GetLine(table.FirstLine)),
+            new TableEdit(TableEditKind.InsertLineBefore, line, Column: 2, Text: src.GetLine(table.FirstLine + 1)),
+        ];
+    }
+
     public static IReadOnlyList<TableEdit> InsertRow(MarkdownTable table, ILineSource src, int rowIndex, bool below)
     {
         string row = NewRow(table, src);

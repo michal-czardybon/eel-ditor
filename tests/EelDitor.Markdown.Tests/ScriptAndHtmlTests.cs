@@ -33,6 +33,12 @@ public class ScriptTests
     [Fact]
     public void StrikeAndSubscript_Together() =>
         Assert.Equal("gone H2O", Line("~~gone~~ H~2~O").Display("~~gone~~ H~2~O"));
+
+    [Theory]
+    [InlineData("a **(5; chamber)**<br>b", "a (5; chamber)<br>b")]   // ")" then "<": both punctuation in CommonMark
+    [InlineData("x **(y)**=z", "x (y)=z")]
+    [InlineData("**[a]**+", "[a]+")]
+    public void EmphasisNextToSymbols(string line, string shown) => Assert.Equal(shown, Line(line).Display(line));
 }
 
 public class MarkdownHtmlTests

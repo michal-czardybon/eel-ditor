@@ -86,18 +86,49 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
             Select(anchor, hit);
         else Select(hit, hit);
         _dragging = true;
-        // The caret goes to the row (as a click there did before), without dropping the selection.
+        MoveCaretInto(hit);
+        _view.Editor.TextArea.Focus();
+        e.Pointer.Capture(_view.Editor.TextArea);
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// The caret goes into the text of the cell at <paramref name="hit"/> (that cell becomes the current one); the
+    /// grid selection is kept.
+    /// </summary>
+    private void MoveCaretInto(Point hit)
+    {
         var area = _view.Editor.TextArea;
         _movingCaret = true;
         try
         {
             area.ClearSelection();
-            area.Caret.Offset = _view.Document.GetLineByNumber(hit.Line).Offset;
+            var line = _view.Document.GetLineByNumber(hit.Line);
+            int column = TableOf(hit.Line)?.RowAtLine(hit.Line - 1) is { } row && hit.Cell < row.Cells.Count
+                ? row.Cells[hit.Cell].ContentStart(_view.Document.GetText(line)) : 0;
+            area.Caret.Offset = line.Offset + column;
         }
         finally { _movingCaret = false; }
-        area.Focus();
-        e.Pointer.Capture(area);
-        e.Handled = true;
+    }
+
+    /// <summary>
+    /// A right click on a grid row: the clicked cell becomes the current one, so the context menu's table commands act
+    /// on it. A click inside the grid selection keeps it (for Copy). False when the point is not over a grid row.
+    /// </summary>
+    internal bool OnContextClick(PointerEventArgs e)
+    {
+        if (HitTest(e) is not { } hit) return false;
+        if (!(HasSelection && Contains(hit))) { Clear(); MoveCaretInto(hit); }
+        return true;
+    }
+
+    /// <summary>Whether a cell is inside the selected block (one cell: that cell).</summary>
+    private bool Contains(Point p)
+    {
+        if (Anchor is not { } a || Active is not { } b) return false;
+        int top = Math.Min(a.Line, b.Line), bottom = Math.Max(a.Line, b.Line);
+        int left = Math.Min(a.Cell, b.Cell), right = Math.Max(a.Cell, b.Cell);
+        return p.Line >= top && p.Line <= bottom && p.Cell >= left && p.Cell <= right;
     }
 
     private void OnMoved(object? sender, PointerEventArgs e)
@@ -125,10 +156,30 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
 
     private void OnCaretMoved(object? sender, EventArgs e)
     {
-        if (!_movingCaret) Clear();
+        if (!_movingCaret && _keep == 0) Clear();
     }
 
-    private void OnDocumentChanged(object? sender, DocumentChangeEventArgs e) => Clear();
+    private void OnDocumentChanged(object? sender, DocumentChangeEventArgs e)
+    {
+        if (_keep == 0) Clear();
+    }
+
+    private int _keep;
+
+    /// <summary>
+    /// Keeps the selection while a command restyles the selected cells: the shown text and the cells stay the same
+    /// (and the selection is held in cells and shown characters, not in source offsets).
+    /// </summary>
+    public IDisposable KeepWhileStyling()
+    {
+        _keep++;
+        return new Release(() => { _keep--; _view.Editor.TextArea.TextView.InvalidateLayer(Layer); });
+    }
+
+    private sealed class Release(Action action) : IDisposable
+    {
+        public void Dispose() => action();
+    }
 
     /// <summary>The shown text of the cells of a row (from the model, so rows out of view work too).</summary>
     private List<string> CellTexts(int lineNumber)
@@ -146,6 +197,9 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
         Anchor is { } a && Active is { } b && a.Line == b.Line && a.Cell == b.Cell
             ? (a.Line, a.Cell, Math.Min(a.Offset, b.Offset), Math.Max(a.Offset, b.Offset)) : null;
 
+    /// <summary>The selected cells when several are selected (rows, a column, a block), else null.</summary>
+    internal (List<int> Lines, int FirstCell, int LastCell)? CellBlock => HasSelection ? Block : null;
+
     /// <summary>Rows (document lines, separators left out) and cells covered by a selection over several cells.</summary>
     private (List<int> Lines, int FirstCell, int LastCell)? Block
     {
@@ -156,6 +210,39 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
                 .Where(n => table.RowAtLine(n - 1) is { Kind: not MdLineKind.TableSeparator }).ToList();
             return (lines, Math.Min(a.Cell, b.Cell), Math.Max(a.Cell, b.Cell));
         }
+    }
+
+    /// <summary>
+    /// The selection as source ranges (line number, start and end column), for commands that change the text (styles,
+    /// clear formatting): part of one cell maps back through the hidden markup; several cells are their whole contents.
+    /// Null when nothing is selected.
+    /// </summary>
+    public List<(int Line, int Start, int End)>? SourcePieces()
+    {
+        if (!HasSelection) return null;
+        var doc = _view.Document;
+        var pieces = new List<(int, int, int)>();
+        if (InCell is { } c)
+        {
+            if (TableOf(c.Line)?.RowAtLine(c.Line - 1) is not { } row || c.Cell >= row.Cells.Count) return null;
+            string text = doc.GetText(doc.GetLineByNumber(c.Line));
+            var map = TableWrap.ShownToSource(text, row.Cells[c.Cell], _view.Model.GetLine(c.Line - 1));
+            if (c.To <= c.From || c.From >= map.Count) return null;
+            pieces.Add((c.Line, map[c.From], map[Math.Min(c.To, map.Count) - 1] + 1));
+            return pieces;
+        }
+        if (Block is not { } block) return null;
+        foreach (int n in block.Lines)
+        {
+            if (TableOf(n)?.RowAtLine(n - 1) is not { } row) continue;
+            string text = doc.GetText(doc.GetLineByNumber(n));
+            for (int i = block.FirstCell; i <= block.LastCell && i < row.Cells.Count; i++)
+            {
+                int cs = row.Cells[i].ContentStart(text), ce = row.Cells[i].ContentEnd(text);
+                if (ce > cs) pieces.Add((n, cs, ce));
+            }
+        }
+        return pieces;
     }
 
     /// <summary>The selected shown text, or null when nothing is selected.</summary>
@@ -198,10 +285,24 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
         }
         if (InCell is { } c) { Paint(c.Line, el => el.Spans(c.Cell, c.From, c.To)); return; }
         if (Block is not { } block) return;
+        // Several cells: each one is outlined (the text stays readable, and its styles visible).
+        var pen = new Pen(_view.Palette.Accent, 1.5);
         foreach (int n in block.Lines)
-            Paint(n, el => Enumerable.Range(block.FirstCell, block.LastCell - block.FirstCell + 1)
-                .Where(i => i < el.Cells.Count)
-                .SelectMany(i => el.Spans(i, 0, Math.Max(1, el.Cells[i].Text.Length))));
+        {
+            var visual = textView.GetVisualLine(n);
+            if (RowElement(visual) is not { } el) continue;
+            int firstText = el.Lines.FindIndex(l => l.Cells is not null), lastText = el.Lines.FindLastIndex(l => l.Cells is not null);
+            if (firstText < 0) continue;
+            double x0 = visual!.GetVisualPosition(0, VisualYPosition.LineTop).X - textView.ScrollOffset.X;
+            double y0 = visual.VisualTop - textView.ScrollOffset.Y;
+            for (int i = block.FirstCell; i <= block.LastCell && i < el.Layout.Widths.Length; i++)
+            {
+                double left = x0 + (TableWrap.BorderAt(el.Layout.Widths, i) + 0.5) * cw;
+                double right = x0 + (TableWrap.BorderAt(el.Layout.Widths, i + 1) + 0.5) * cw;
+                var rect = new Rect(left, y0 + firstText * lh, Math.Max(0, right - left), (lastText - firstText + 1) * lh);
+                drawingContext.DrawRectangle(null, pen, rect.Deflate(0.75), 2, 2);
+            }
+        }
     }
 
     public void Dispose()

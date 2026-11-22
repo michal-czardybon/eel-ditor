@@ -53,6 +53,12 @@ public partial class MainWindow
         var row = view.Model.TableAtLine(lineNumber - 1)?.RowAtLine(lineNumber - 1);
         if (row is null || row.Kind == MdLineKind.TableSeparator || row.Cells.Count == 0) return;
         cellIndex = Math.Clamp(cellIndex, 0, row.Cells.Count - 1);
+        // The edited cell is the current one (also when Tab moves the editor to the next cell).
+        {
+            var l = Editor.Document.GetLineByNumber(lineNumber);
+            Editor.TextArea.ClearSelection();
+            Editor.CaretOffset = l.Offset + row.Cells[cellIndex].ContentStart(Editor.Document.GetText(l));
+        }
 
         Editor.ScrollTo(lineNumber, 1);
         Editor.TextArea.TextView.EnsureVisualLines();
@@ -66,7 +72,19 @@ public partial class MainWindow
         foreach (var br in view.RenderFor(line).Breaks.Where(b => b.Start >= cs && b.End <= ce).OrderByDescending(b => b.Start))
             original = original[..(br.Start - cs)].TrimEnd(' ') + "\n" + original[(br.End - cs)..].TrimStart(' ');
 
-        var (width, height) = CellEditorSize(original, rect.Width);
+        // In a grid the editor lies exactly over the cell's text and wraps at the cell's width, so the text keeps its
+        // layout while it is edited; it is as tall as the text (plus a line to type into), so no scroll bar is needed.
+        var table = view.Model.TableAtLine(lineNumber - 1);
+        int? gridColumns = view.TablesAsGrid && table is not null && view.GridLayout(table) is { } layout && cellIndex < layout.Widths.Length
+            ? layout.Widths[cellIndex] : null;
+        var (width, height) = gridColumns is int columns ? GridCellEditorSize(original, columns) : CellEditorSize(original, rect.Width);
+        if (gridColumns is not null)
+        {
+            // The popup's frame (1 + 3), the editor's padding (4, 2) and the text area's own margin (about 5) put the
+            // text that far from the popup's corner (measured on a rendered frame).
+            double cw = Editor.TextArea.TextView.WideSpaceWidth;
+            rect = new Rect(rect.X + 2 * cw - (1 + 3 + 4 + 5), rect.Y - (1 + 3 + 2), rect.Width, rect.Height);
+        }
         var editor = new TextEditor
         {
             Document = new TextDocument(original),
@@ -78,7 +96,7 @@ public partial class MainWindow
             Height = height,
             Padding = new Thickness(4, 2),
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = gridColumns is null ? Avalonia.Controls.Primitives.ScrollBarVisibility.Auto : Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
             Background = Palette.Background,
             Foreground = Palette.Foreground,
         };
@@ -87,9 +105,9 @@ public partial class MainWindow
         editor.TextArea.SelectionBrush = Palette.Selection;
         var cellView = new MarkdownView(editor, editor.Document, Palette, _active?.DirectoryPath);
 
-        var hint = new TextBlock { Text = Loc.T("Table.CellEditHint"), FontSize = 11, Margin = new Thickness(4, 3, 4, 1), TextWrapping = Avalonia.Media.TextWrapping.Wrap, MaxWidth = width }
+        var hint = new TextBlock { Text = Loc.T("Table.CellEditHint"), FontSize = 11, Margin = new Thickness(4, 3, 4, 1), TextWrapping = Avalonia.Media.TextWrapping.Wrap, MaxWidth = Math.Max(width, 300) }
             .Res(TextBlock.ForegroundProperty, "DimTextBrush");
-        var error = new TextBlock { FontSize = 12, Margin = new Thickness(4, 3, 4, 1), TextWrapping = Avalonia.Media.TextWrapping.Wrap, MaxWidth = width, IsVisible = false }
+        var error = new TextBlock { FontSize = 12, Margin = new Thickness(4, 3, 4, 1), TextWrapping = Avalonia.Media.TextWrapping.Wrap, MaxWidth = Math.Max(width, 300), IsVisible = false }
             .Res(TextBlock.ForegroundProperty, "GitDeletedBrush");
         var panel = new StackPanel { Orientation = Orientation.Vertical };
         panel.Children.Add(editor);
@@ -176,6 +194,24 @@ public partial class MainWindow
             }
         }, RoutingStrategies.Tunnel);
 
+        if (gridColumns is not null)
+        {
+            // The real height once laid out (hidden markup, wide characters): the whole text plus a line, growing while
+            // typing; a scroll bar only past most of the window.
+            double maxHeight = Math.Max(4 * Editor.TextArea.TextView.DefaultLineHeight, Editor.TextArea.TextView.Bounds.Height * 0.75);
+            void Fit()
+            {
+                var tv = editor.TextArea.TextView;
+                tv.EnsureVisualLines();
+                double wanted = tv.DocumentHeight + tv.DefaultLineHeight + editor.Padding.Top + editor.Padding.Bottom + 2;
+                editor.Height = Math.Min(maxHeight, wanted);
+                editor.VerticalScrollBarVisibility = wanted > maxHeight
+                    ? Avalonia.Controls.Primitives.ScrollBarVisibility.Auto : Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled;
+            }
+            editor.TextChanged += (_, _) => Dispatcher.UIThread.Post(Fit, DispatcherPriority.Background);
+            popup.Opened += (_, _) => Dispatcher.UIThread.Post(Fit, DispatcherPriority.Background);
+        }
+
         _cellPopup = popup;
         _cellEditor = editor;
         ((ISetLogicalParent)popup).SetParent(this);
@@ -189,6 +225,17 @@ public partial class MainWindow
     /// The cell editor's size: at least the cell, wider for long text, and tall enough for the whole text plus room
     /// to type, so that a scroll bar is needed only for very long cells (more than most of the window).
     /// </summary>
+    /// <summary>The cell editor over a grid cell: exactly the cell's text columns wide, the text's height plus a line.</summary>
+    internal (double Width, double Height) GridCellEditorSize(string text, int columns)
+    {
+        var tv = Editor.TextArea.TextView;
+        double charWidth = Math.Max(1, tv.WideSpaceWidth), lineHeight = tv.DefaultLineHeight;
+        // Room for exactly `columns` characters (half a character more, so the last one does not wrap) and the padding.
+        double width = (columns + 0.5) * charWidth + 4 * 2;
+        double height = (WrappedLineCount(text, Math.Max(1, columns)) + 1) * lineHeight + 2 * 2 + 2;
+        return (width, height);
+    }
+
     internal (double Width, double Height) CellEditorSize(string text, double cellWidth)
     {
         var tv = Editor.TextArea.TextView;

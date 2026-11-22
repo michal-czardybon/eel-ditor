@@ -19,12 +19,18 @@ public static class MarkdownCommands
         var doc = editor.Document;
         int firstLine = doc.GetLineByOffset(editor.SelectionLength > 0 ? editor.SelectionStart : editor.CaretOffset).LineNumber;
         int lastLine = doc.GetLineByOffset(editor.SelectionLength > 0 ? editor.SelectionStart + editor.SelectionLength : editor.CaretOffset).LineNumber;
+        // Selected table cells: their lines are the ones changed (and to be tidied up), wherever the caret is.
+        if (editor.SelectionLength == 0 && view.CellSelectionPieces() is { Count: > 0 } cells)
+            (firstLine, lastLine) = (cells.Min(c => c.Line), cells.Max(c => c.Line));
+        // Parsers and line kinds taken before the change: inside the update the model is not reparsed per line.
+        var parsers = ParsersFor(view, doc, Enumerable.Range(firstLine, Math.Max(0, Math.Min(lastLine, doc.LineCount) - firstLine + 1)));
         // One undo step for the whole change.
         using (doc.RunUpdate())
         {
-            int failed = ToggleStyleCore(editor, view, marker, style);
+            int failed = ToggleStyleCore(editor, view, marker, style, parsers);
             // "**Prost****y**" → "**Prosty**": neighbouring spans of the same style become one.
-            for (int n = Math.Min(lastLine, doc.LineCount); n >= firstLine; n--) MergeAdjacentSpans(doc, view, n);
+            for (int n = Math.Min(lastLine, doc.LineCount); n >= firstLine; n--)
+                if (parsers.TryGetValue(n, out var p) && p is not null) MergeAdjacentSpans(doc, view, n, p);
             // A selection whose text went with the markers is empty, but stays a selection object: the next typed
             // character would then not move the caret (and "ab" would come out as "ba").
             if (editor.SelectionLength == 0) editor.TextArea.ClearSelection();
@@ -32,11 +38,13 @@ public static class MarkdownCommands
         }
     }
 
-    private static int ToggleStyleCore(TextEditor editor, MarkdownView view, string marker, MdStyle style)
+    private static int ToggleStyleCore(TextEditor editor, MarkdownView view, string marker, MdStyle style, Dictionary<int, Func<string, LineRender?>?> parsers)
     {
         var doc = editor.Document;
         List<(int Line, int Start, int End)> pieces;
-        if (editor.SelectionLength == 0 || editor.TextArea.Selection is RectangleSelection)
+        if (editor.SelectionLength == 0 && view.CellSelectionPieces() is { Count: > 0 } cells)
+            pieces = cells; // selected table cells (a column, a row, part of a grid cell)
+        else if (editor.SelectionLength == 0 || editor.TextArea.Selection is RectangleSelection)
         {
             // The caret on a table row but not in a cell's text (at the start or end of the line, on a pipe, or
             // anywhere when the table is drawn as a grid): the whole row.
@@ -62,7 +70,7 @@ public static class MarkdownCommands
                 var line = doc.GetLineByNumber(group.Key);
                 string old = doc.GetText(line);
                 string text = old;
-                var parse = ParserFor(view, doc, group.Key);
+                var parse = parsers.TryGetValue(group.Key, out var known) && known is not null ? known : ParserFor(view, doc, group.Key);
                 foreach (var p in group.OrderByDescending(p => p.Start))
                 {
                     string? result = remove ? Unwrap(text, p.Start, p.End, marker, style, parse)
@@ -89,6 +97,13 @@ public static class MarkdownCommands
         int col = editor.CaretOffset - line.Offset;
         var cells = row.Cells.Select(c => (Start: c.ContentStart(text), End: c.ContentEnd(text))).Where(c => c.End > c.Start).ToList();
         if (!view.TablesAsGrid && cells.Any(c => col >= c.Start && col <= c.End)) return null; // in a cell: the word there
+        // A grid: the current cell (the one the caret is in) is what the command acts on.
+        if (view.TablesAsGrid && view.CurrentCell is { } current && current.Line == line.LineNumber && current.Cell < row.Cells.Count)
+        {
+            var cell = row.Cells[current.Cell];
+            int cs = cell.ContentStart(text), ce = cell.ContentEnd(text);
+            return ce > cs ? [(line.LineNumber, cs, ce)] : [];
+        }
         return cells.Select(c => (line.LineNumber, c.Start, c.End)).ToList();
     }
 
@@ -246,20 +261,23 @@ public static class MarkdownCommands
     public static (int Converted, int Skipped) ConvertStyle(TextEditor editor, MarkdownView view, MdStyle from, MdStyle to)
     {
         var doc = editor.Document;
+        if (editor.SelectionLength == 0 && view.CellSelectionPieces() is { Count: > 0 } cells)
+            return ApplyToPieces(view, doc, cells, (text, s, e, parse) => (StyleConversion.Convert(text, from, to, s, e, parse, out int c, out int k), c, k));
         bool selection = editor.SelectionLength > 0;
         int selStart = selection ? editor.SelectionStart : 0, selEnd = selection ? editor.SelectionStart + editor.SelectionLength : doc.TextLength;
         int first = doc.GetLineByOffset(selStart).LineNumber, last = doc.GetLineByOffset(selEnd).LineNumber;
         int converted = 0, skipped = 0;
+        var parsers = ParsersFor(view, doc, Enumerable.Range(first, last - first + 1));
         using (doc.RunUpdate())
         {
             for (int n = first; n <= last; n++)
             {
                 var line = doc.GetLineByNumber(n);
-                if (view.RenderFor(line).Kind is MdLineKind.Code or MdLineKind.FenceDelimiter) continue;
+                if (parsers[n] is null) continue;
                 string text = doc.GetText(line);
                 int start = Math.Max(0, selStart - line.Offset), end = Math.Min(text.Length, selEnd - line.Offset);
                 if (end <= start && selection) continue;
-                string result = StyleConversion.Convert(text, from, to, start, selection ? end : text.Length, ParserFor(view, doc, n), out int c, out int s);
+                string result = StyleConversion.Convert(text, from, to, start, selection ? end : text.Length, parsers[n]!, out int c, out int s);
                 converted += c;
                 skipped += s;
                 if (result != text) ReplaceDifference(doc, line.Offset, text, result);
@@ -275,26 +293,58 @@ public static class MarkdownCommands
     public static (int Cleared, int Skipped) ClearFormatting(TextEditor editor, MarkdownView view)
     {
         var doc = editor.Document;
+        if (editor.SelectionLength == 0 && view.CellSelectionPieces() is { Count: > 0 } cells)
+            return ApplyToPieces(view, doc, cells, (text, s, e, parse) => (StyleConversion.Clear(text, s, e, parse, out int c, out int k), c, k));
         int selStart = editor.SelectionLength > 0 ? editor.SelectionStart : editor.CaretOffset;
         int selEnd = editor.SelectionLength > 0 ? editor.SelectionStart + editor.SelectionLength : editor.CaretOffset;
         int first = doc.GetLineByOffset(selStart).LineNumber, last = doc.GetLineByOffset(selEnd).LineNumber;
         int cleared = 0, skipped = 0;
+        var parsers = ParsersFor(view, doc, Enumerable.Range(first, last - first + 1));
         using (doc.RunUpdate())
         {
             for (int n = first; n <= last; n++)
             {
                 var line = doc.GetLineByNumber(n);
-                if (view.RenderFor(line).Kind is MdLineKind.Code or MdLineKind.FenceDelimiter) continue;
+                if (parsers[n] is null) continue;
                 string text = doc.GetText(line);
                 int start = Math.Clamp(selStart - line.Offset, 0, text.Length), end = Math.Clamp(selEnd - line.Offset, 0, text.Length);
                 if (end <= start && selStart != selEnd) continue;
-                string result = StyleConversion.Clear(text, start, end, ParserFor(view, doc, n), out int c, out int s);
+                string result = StyleConversion.Clear(text, start, end, parsers[n]!, out int c, out int s);
                 cleared += c;
                 skipped += s;
                 if (result != text) ReplaceDifference(doc, line.Offset, text, result);
             }
         }
         return (cleared, skipped);
+    }
+
+    /// <summary>
+    /// Runs a line change on each of the given pieces (selected table cells), right to left within a line so the
+    /// columns of the others stay valid; one undo step. Returns the summed counts.
+    /// </summary>
+    private static (int, int) ApplyToPieces(MarkdownView view, TextDocument doc, List<(int Line, int Start, int End)> pieces,
+        Func<string, int, int, Func<string, LineRender?>, (string Text, int Done, int Skipped)> change)
+    {
+        int done = 0, skipped = 0;
+        var parsers = ParsersFor(view, doc, pieces.Select(p => p.Line).Distinct());
+        using (doc.RunUpdate())
+        {
+            foreach (var group in pieces.GroupBy(p => p.Line))
+            {
+                var line = doc.GetLineByNumber(group.Key);
+                string old = doc.GetText(line), text = old;
+                if (parsers[group.Key] is not { } parse) continue;
+                foreach (var p in group.OrderByDescending(p => p.Start))
+                {
+                    var (result, d, s) = change(text, p.Start, Math.Min(p.End, text.Length), parse);
+                    text = result;
+                    done += d;
+                    skipped += s;
+                }
+                if (text != old) ReplaceDifference(doc, line.Offset, old, text);
+            }
+        }
+        return (done, skipped);
     }
 
     // ---------------------------------------------------------------- lists
@@ -389,6 +439,21 @@ public static class MarkdownCommands
             Apply(editor, change, editor.CaretOffset);
         }
         return true;
+    }
+
+    /// <summary>
+    /// Line parsers for the given lines, taken from the model once (before a change): null for code lines, which are
+    /// never restyled. Commands use these inside their update instead of the model.
+    /// </summary>
+    private static Dictionary<int, Func<string, LineRender?>?> ParsersFor(MarkdownView view, TextDocument doc, IEnumerable<int> lineNumbers)
+    {
+        var result = new Dictionary<int, Func<string, LineRender?>?>();
+        foreach (int n in lineNumbers)
+        {
+            if (n < 1 || n > doc.LineCount || result.ContainsKey(n)) continue;
+            result[n] = view.Model.GetLine(n - 1).Kind is MdLineKind.Code or MdLineKind.FenceDelimiter ? null : ParserFor(view, doc, n);
+        }
+        return result;
     }
 
     private static Func<string, LineRender?> ParserFor(MarkdownView view, TextDocument doc, int lineNumber)
@@ -597,6 +662,7 @@ public static class MarkdownCommands
         IReadOnlyList<TableEdit> edits = command switch
         {
             TableCommand.InsertRowAbove => TableEditor.InsertRow(table, src, row, below: false),
+            TableCommand.Split => TableEditor.Split(table, src, row),
             TableCommand.InsertRowBelow => TableEditor.InsertRow(table, src, row, below: true),
             TableCommand.InsertColumnLeft => TableEditor.InsertColumn(table, src, col, right: false),
             TableCommand.InsertColumnRight => TableEditor.InsertColumn(table, src, col, right: true),
@@ -618,6 +684,7 @@ public static class MarkdownCommands
             TableCommand.InsertRowBelow => row <= 1 ? table.FirstLine + 3 : caretLine + 1,
             TableCommand.InsertRowAbove => row <= 1 ? table.FirstLine + 3 : caretLine,
             TableCommand.MoveRowUp => caretLine - 1,
+            TableCommand.Split => row >= 2 ? caretLine + 3 : caretLine,
             TableCommand.MoveRowDown => caretLine + 1,
             TableCommand.DeleteRow => Math.Min(caretLine, doc.LineCount),
             _ => caretLine,
@@ -1435,14 +1502,15 @@ public static class MarkdownCommands
     /// Joins neighbouring spans of the same style on a line ("**Prost****y**" → "**Prosty**"), when the line then
     /// shows the same text with the whole joined range in that style.
     /// </summary>
-    public static void MergeAdjacentSpans(TextDocument doc, MarkdownView view, int lineNumber)
+    public static void MergeAdjacentSpans(TextDocument doc, MarkdownView view, int lineNumber, Func<string, LineRender?>? parser = null)
     {
+        var parse = parser ?? ParserFor(view, doc, lineNumber);
         for (int guard = 0; guard < 20; guard++)
         {
             var line = doc.GetLineByNumber(lineNumber);
             string text = doc.GetText(line);
-            var render = view.RenderFor(line);
-            var parse = ParserFor(view, doc, lineNumber);
+            // The line parsed as it is now (not the document model, which is not reparsed inside an update).
+            if (parse(text) is not { } render) return;
             string? merged = null;
             foreach (var s1 in render.Styles)
             {
@@ -1483,6 +1551,7 @@ public static class MarkdownCommands
 
 public enum TableCommand
 {
+    Split,
     InsertRowAbove,
     InsertRowBelow,
     InsertColumnLeft,

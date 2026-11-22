@@ -462,6 +462,8 @@ public partial class MainWindow : Window
     private MarkdownView CreateMarkdownView(EditorDocument doc)
     {
         var view = new MarkdownView(Editor, doc.Document, Palette, doc.DirectoryPath);
+        // Select column / row in a table shown as text: style commands act on those cells.
+        view.TextModeCellRanges = () => _tableSelection?.Ranges ?? [];
         view.LinkActivated += url => _ = OpenLinkAsync(url, doc);
         view.CellEditRequested += EditTableCell;
         return view;

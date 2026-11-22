@@ -381,8 +381,10 @@ public partial class MainWindow
 
     private void ToggleCurrentLine()
     {
-        Editor.Options.HighlightCurrentLine = !Editor.Options.HighlightCurrentLine;
-        _settings.HighlightCurrentLine = Editor.Options.HighlightCurrentLine;
+        _settings.HighlightCurrentLine = !_settings.HighlightCurrentLine;
+        // On a grid row the band is off for the moment; the Markdown view applies the choice when the caret leaves it.
+        if (_markdown is not null) _markdown.SetCurrentLineHighlight(_settings.HighlightCurrentLine);
+        else Editor.Options.HighlightCurrentLine = _settings.HighlightCurrentLine;
     }
 
     private double _sidebarWidthBeforeHide = 260;
@@ -449,21 +451,26 @@ public partial class MainWindow
     private void ClearFormatting()
     {
         if (_markdown is null || Editor.IsReadOnly) return;
-        var (cleared, skipped) = MarkdownCommands.ClearFormatting(Editor, _markdown);
+        (int cleared, int skipped) result;
+        using (KeepCellSelection()) result = MarkdownCommands.ClearFormatting(Editor, _markdown);
+        var (cleared, skipped) = result;
         SetStatusMessage(skipped > 0 ? Loc.T("Md.ClearedSkipped", cleared, skipped) : Loc.T("Md.Cleared", cleared));
     }
 
     private void ConvertStyle(MdStyle from, MdStyle to)
     {
         if (_markdown is null || Editor.IsReadOnly) return;
-        var (converted, skipped) = MarkdownCommands.ConvertStyle(Editor, _markdown, from, to);
+        (int converted, int skipped) result;
+        using (KeepCellSelection()) result = MarkdownCommands.ConvertStyle(Editor, _markdown, from, to);
+        var (converted, skipped) = result;
         SetStatusMessage(skipped > 0 ? Loc.T("Convert.DoneSkipped", converted, skipped) : Loc.T("Convert.Done", converted));
     }
 
     private void MdStyleToggle(string marker, MdStyle style)
     {
         if (_markdown is null) return;
-        int failed = MarkdownCommands.ToggleStyle(Editor, _markdown, marker, style);
+        int failed;
+        using (KeepCellSelection()) failed = MarkdownCommands.ToggleStyle(Editor, _markdown, marker, style);
         if (failed > 0) SetStatusMessage(Loc.T("Md.StyleSkipped", failed));
     }
 
@@ -491,11 +498,47 @@ public partial class MainWindow
     }
 
     private TableSelectionRenderer? _tableSelection;
+    private bool _keepingCells;
+
+    /// <summary>
+    /// Keeps the selected cells (a grid selection, or Select column / row in a table shown as text) while a style
+    /// command changes them, so the next command applies to the same cells. A text-mode selection is held as source
+    /// ranges, so they are recomputed for the changed text afterwards.
+    /// </summary>
+    private IDisposable KeepCellSelection()
+    {
+        var grid = _markdown?.GridSelection.KeepWhileStyling();
+        _keepingCells = true;
+        return new Disposer(() =>
+        {
+            _keepingCells = false;
+            grid?.Dispose();
+            if (_tableSelection is not { Ranges.Count: > 0 } sel || _markdown?.Model.TableAtLine(sel.TableLine) is not { } table) return;
+            sel.Ranges = sel.Column >= 0 ? [.. TableEditor.ColumnRanges(table, sel.Column)]
+                : table.RowAtLine(sel.RowLine) is { } r ? [.. TableEditor.RowRanges(table, sel.RowLine - table.FirstLine)] : [];
+            Editor.TextArea.TextView.InvalidateLayer(KnownLayer.Selection);
+        });
+    }
+
+    private sealed class Disposer(Action action) : IDisposable
+    {
+        public void Dispose() => action();
+    }
 
     /// <summary>Highlights a table column (or row). Copy then copies it as tab separated values.</summary>
     private void SelectTablePart(bool column)
     {
         if (_markdown is null || MarkdownCommands.TableAtCaret(Editor, _markdown) is not var (table, row, col)) return;
+        if (_markdown.TablesAsGrid)
+        {
+            // A table drawn as a grid shows no source text: the grid's own selection takes the cells (Ctrl+C copies them).
+            int line = table.Rows[row].LineIndex + 1;
+            int cells = Math.Max(1, table.ColumnCount);
+            if (column) _markdown.GridSelection.Select(new(table.FirstLine + 1, col, 0), new(table.LastLine + 1, col, 0));
+            else _markdown.GridSelection.Select(new(line, 0, 0), new(line, cells - 1, 0));
+            SetStatusMessage(Loc.T(column ? "Table.ColumnSelected" : "Table.RowSelected"));
+            return;
+        }
         var ranges = column ? TableEditor.ColumnRanges(table, col) : TableEditor.RowRanges(table, row);
         if (_tableSelection is null)
         {
@@ -503,12 +546,14 @@ public partial class MainWindow
             Editor.TextArea.TextView.BackgroundRenderers.Add(_tableSelection);
             Editor.TextArea.Caret.PositionChanged += (_, _) =>
             {
-                if (_tableSelection.Ranges.Count > 0 && !_tableSelection.Sticky) { _tableSelection.Ranges = []; Editor.TextArea.TextView.InvalidateLayer(KnownLayer.Background); }
+                if (_tableSelection.Ranges.Count > 0 && !_tableSelection.Sticky && !_keepingCells) { _tableSelection.Ranges = []; Editor.TextArea.TextView.InvalidateLayer(KnownLayer.Background); }
                 _tableSelection.Sticky = false;
             };
         }
         _tableSelection.Ranges = ranges.ToList();
         _tableSelection.Column = column ? col : -1;
+        _tableSelection.TableLine = table.FirstLine;
+        _tableSelection.RowLine = table.Rows[row].LineIndex;
         _tableSelection.Sticky = true;
         Editor.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
         SetStatusMessage(Loc.T(column ? "Table.ColumnSelected" : "Table.RowSelected"));
@@ -525,6 +570,8 @@ public partial class MainWindow
     {
         public List<CellRange> Ranges { get; set; } = [];
         public int Column { get; set; } = -1;
+        public int TableLine { get; set; }
+        public int RowLine { get; set; }
         public bool Sticky { get; set; }
         public KnownLayer Layer => KnownLayer.Selection;
 
