@@ -45,12 +45,13 @@ public class LocalizationTests
         var isv = Read("isv");
         Assert.Equal("Anuluj", isv["Button.Cancel"]);
         Assert.Equal("Izsěči", isv["Menu.Edit.Cut"]);
+        Assert.Equal("Kopijuj", isv["Menu.Edit.Copy"]);
         Assert.Equal("Iznova pročitaj iz diska", isv["Menu.File.Reload"]);
         foreach (var (key, text) in isv)
         {
             Assert.DoesNotContain("prěčrk", text);
             Assert.DoesNotContain("Izrěži", text);
-            Assert.DoesNotContain("opir", text); // kopiruj / kopirovano
+            Assert.DoesNotContain("opir", text); // kopiruj / kopirovano (preferred: kopijuj / kopijovano)
             Assert.DoesNotContain(" s diska", text);
             Assert.DoesNotContain("v vs", text);
             Assert.DoesNotContain("odstranjenje togda", text);

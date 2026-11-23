@@ -323,7 +323,7 @@ diff-friendly mode.
   `isv-Cyrl.json` is generated from `isv.json` (`py tools/make_isv_cyrl.py`; official Cyrillic alphabet, git terms, key
   names and Markdown syntax stay Latin): edit `isv.json` only, then regenerate.
   Interslavic UI rules (user's decisions): buttons and menu items are imperatives (*Anuluj*, *Kopiuj*, *Vstavi*),
-  never infinitives (infinitive only in yes/no questions); *Kopiuj* (not *kopiruj*); *Izsěči* for Cut; *iz diska*
+  never infinitives (infinitive only in yes/no questions); *Kopijuj* (dictionary *kopijovati*, not *kopiruj*); *Izsěči* for Cut; *iz diska*
   (from the disk, not *s diska*); *vo vsih* before *vs-*; verbal nouns of the imperfective for ongoing actions
   (*pisanje, vstavjanje, odstranjanje*); strikethrough is *izčrknuty* (a dictionary word; *prěčrknuty* does not exist).
   Labels are short; explanations (including Markdown syntax such as `==text==`) go into tooltips, never into the label.
