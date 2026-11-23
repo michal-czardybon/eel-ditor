@@ -1,3 +1,5 @@
 * text=auto
 # Test fixtures must stay byte-exact
 tests/**/Fixtures/** -text
+# Linux files must keep LF line endings (a CR breaks the shebang and the desktop entry)
+installer/linux/** text eol=lf
