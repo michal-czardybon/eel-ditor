@@ -477,5 +477,9 @@
   "Menu.View.PreviewTip": "A preview of an HTML or Markdown file next to the text, drawn by Eel-ditor itself (no browser: no scripts, CSS or content from the internet). It follows your typing.",
   "Preview.NoFile": "No file is open.",
   "Preview.NotAvailable": "The preview is available for HTML and Markdown files.",
-  "Preview.TooLarge": "The file is too large to preview."
+  "Preview.TooLarge": "The file is too large to preview.",
+  "Menu.File.Print": "Print…",
+  "Menu.File.PrintTip": "Opens the document in the default browser with its print dialog (print preview, printer, save as PDF).",
+  "Print.Opened": "The document is open in the browser for printing.",
+  "Preview.Close": "Close the preview"
 }

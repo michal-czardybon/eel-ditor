@@ -22,16 +22,24 @@ public static partial class MarkdownHtml
     [GeneratedRegex(@"^ {0,3}> ?")]
     private static partial Regex QuoteRegex();
 
-    /// <summary>A whole page: <paramref name="body"/> from <see cref="Body"/> with the style sheet.</summary>
-    public static string Page(string title, string body, string? baseUri = null)
+    /// <summary>The script of a page meant for printing: the browser's print dialog opens once the page has loaded.</summary>
+    public const string PrintScript = "<script>window.addEventListener('load', function () { window.print(); });</script>\n";
+
+    /// <summary>
+    /// A whole page: <paramref name="body"/> from <see cref="Body"/> with the style sheet. <paramref name="print"/>:
+    /// the page opens the browser's print dialog when loaded (its one inline script is allowed, nothing else).
+    /// </summary>
+    public static string Page(string title, string body, string? baseUri = null, bool print = false)
     {
         var sb = new StringBuilder();
         sb.Append("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\n");
         // Only local files and inline styles: nothing is fetched from the network.
-        sb.Append("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src file: data:; style-src 'unsafe-inline'\">\n");
+        sb.Append("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src file: data:; style-src 'unsafe-inline'")
+          .Append(print ? "; script-src 'unsafe-inline'" : "").Append("\">\n");
         if (baseUri is not null) sb.Append("<base href=\"").Append(WebUtility.HtmlEncode(baseUri)).Append("\">\n");
         sb.Append("<title>").Append(WebUtility.HtmlEncode(title)).Append("</title>\n<style>").Append(Css).Append("</style>\n</head><body>\n");
         sb.Append(body);
+        if (print) sb.Append(PrintScript);
         sb.Append("</body></html>\n");
         return sb.ToString();
     }

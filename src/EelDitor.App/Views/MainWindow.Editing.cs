@@ -357,11 +357,18 @@ public partial class MainWindow
         _settings.WordWrap = Editor.WordWrap;
     }
 
+    private EelDitor.App.Editor.WhitespaceMarks? _whitespaceMarks;
+
+    /// <summary>The end-of-line marks are shown (View → Show line endings).</summary>
+    internal bool ShowsEndOfLine => _whitespaceMarks?.LineEnds == true;
+
+    /// <summary>The marks for spaces and tabs are shown (View → Show spaces and tabs).</summary>
+    internal bool ShowsSpaces => _whitespaceMarks?.Spaces == true;
+
     private void SetWhitespace(bool spaces, bool eol)
     {
-        Editor.Options.ShowSpaces = spaces;
-        Editor.Options.ShowTabs = spaces;
-        Editor.Options.ShowEndOfLine = eol;
+        _whitespaceMarks!.Spaces = spaces;
+        _whitespaceMarks.LineEnds = eol;
         _settings.ShowSpacesAndTabs = spaces;
         _settings.ShowEndOfLine = eol;
         RefreshCommandStates();
@@ -369,7 +376,7 @@ public partial class MainWindow
 
     private void ToggleAllCharacters()
     {
-        bool all = Editor.Options.ShowSpaces && Editor.Options.ShowEndOfLine;
+        bool all = ShowsSpaces && ShowsEndOfLine;
         SetWhitespace(!all, !all);
     }
 

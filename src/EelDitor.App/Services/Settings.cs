@@ -18,7 +18,8 @@ public sealed class AppSettings
     public bool BoldFontChecked { get; set; }
     public double FontSize { get; set; } = 13;
     public int TabSize { get; set; } = 4;
-    public bool UseSpaces { get; set; } = true;
+    /// <summary>Off by default: the Tab key types a tab. (Pasted text keeps its tabs either way.)</summary>
+    public bool UseSpaces { get; set; }
     /// <summary>On by default: long lines (one line per paragraph) and wide tables fit the window.</summary>
     public bool WordWrap { get; set; } = true;
     public bool ShowSpacesAndTabs { get; set; }

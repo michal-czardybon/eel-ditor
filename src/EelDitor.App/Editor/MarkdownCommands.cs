@@ -53,13 +53,26 @@ public static class MarkdownCommands
         }
         else pieces = SelectedPieces(editor, view);
         if (pieces.Count == 0) return 0;
-        // Off when every selected character already has the style.
+        // Off when every selected letter and digit already has the style. Punctuation and spaces do not count: in
+        // "**adjective agreement**:" a selection up to the line end takes the plain colon, and the user means the
+        // bold words (it used to add bold instead, which looked like nothing happened). Only a selection of
+        // punctuation alone is judged by all its characters.
+        bool HasStyle(LineRender render, int i) => render.Styles.Any(s => i >= s.Start && i < s.End && s.Style.HasFlag(style));
         bool remove = pieces.All(p =>
         {
             var line = doc.GetLineByNumber(p.Line);
             var render = view.RenderFor(line);
+            string lineText = doc.GetText(line);
+            bool anyWord = false;
+            for (int i = p.Start; i < p.End && i < lineText.Length; i++)
+            {
+                if (render.IsHidden(i) || !char.IsLetterOrDigit(lineText[i])) continue;
+                anyWord = true;
+                if (!HasStyle(render, i)) return false;
+            }
+            if (anyWord) return true;
             for (int i = p.Start; i < p.End; i++)
-                if (!render.IsHidden(i) && !render.Styles.Any(s => i >= s.Start && i < s.End && s.Style.HasFlag(style))) return false;
+                if (!render.IsHidden(i) && !HasStyle(render, i)) return false;
             return true;
         });
         int failed = 0;
@@ -180,9 +193,20 @@ public static class MarkdownCommands
     }
 
     /// <summary>Removes the style of the span around [start, end): the markers right outside it, or those of the enclosing span.</summary>
+    /// <summary>The ways a style may be written: bold as ** or __, italic as * or _ (files from elsewhere use both).</summary>
+    private static string[] MarkerVariants(string marker) => marker switch
+    {
+        "**" => ["**", "__"],
+        "*" => ["*", "_"],
+        _ => [marker],
+    };
+
+    private static string? TryUnwrapAny(string text, int start, int end, string marker, Func<string, LineRender?> parse) =>
+        MarkerVariants(marker).Select(m => InlineStyleEdit.TryUnwrap(text, start, end, m, parse)).FirstOrDefault(r => r is not null);
+
     private static string? Unwrap(string text, int start, int end, string marker, MdStyle style, Func<string, LineRender?> parse)
     {
-        if (InlineStyleEdit.TryUnwrap(text, start, end, marker, parse) is { } direct) return direct;
+        if (TryUnwrapAny(text, start, end, marker, parse) is { } direct) return direct;
         if (parse(text) is not { } render) return null;
         // Part of a span: the style ends before the range and starts again after it ("**p**ogr**ubieniem**").
         if (UnwrapPart(text, start, end, marker, style, parse, render) is { } part) return part;
@@ -194,7 +218,7 @@ public static class MarkdownCommands
         string result = text;
         foreach (var s in spans)
         {
-            if (InlineStyleEdit.TryUnwrap(result, s.Start, s.End, marker, parse) is not { } next) return null;
+            if (TryUnwrapAny(result, s.Start, s.End, marker, parse) is not { } next) return null;
             result = next;
         }
         return result;
@@ -213,7 +237,19 @@ public static class MarkdownCommands
         if (end <= start) return null;
         var span = render.Styles.Where(s => s.Style.HasFlag(style) && s.Start <= start && s.End >= end)
             .OrderBy(s => s.End - s.Start).FirstOrDefault();
-        if (span.Style == MdStyle.None || span.Start == start && span.End == end) return null;
+        if (span.Style == MdStyle.None) return null;
+        // Punctuation left alone at an edge of the span goes with the range: it cannot keep the style by itself
+        // ("**Ważna uwaga:**" without "uwaga" would be "**Ważna** uwaga**:**", and a ** between a letter and a colon
+        // opens nothing), so "uwaga:" loses it and "Ważna" stays bold.
+        bool OnlyPunctuation(int a, int b)
+        {
+            for (int i = a; i < b; i++)
+                if (!render.IsHidden(i) && char.IsLetterOrDigit(text[i])) return false;
+            return true;
+        }
+        if (end < span.End && OnlyPunctuation(end, span.End)) end = span.End;
+        if (start > span.Start && OnlyPunctuation(span.Start, start)) start = span.Start;
+        if (span.Start == start && span.End == end) return null;
         var open = render.Hidden.LastOrDefault(h => h.End == span.Start);
         if (open.Length == 0) return null;
         string m = new(text[open.Start], marker.Length); // "**" or "__"

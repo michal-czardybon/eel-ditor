@@ -45,6 +45,13 @@ public static class InlineStyleEdit
         string inner = line[start..end];
         var candidates = new List<string>();
         // Part of the range already has this style: preferably drop the inner markers and style the whole range.
+        // Markers right outside the range belong to it too ("**bold**:" selected from "bold" to the end): left
+        // there they would pile up ("****bold**:**").
+        int s2 = start, e2 = end;
+        if (s2 >= marker.Length && line.AsSpan(s2 - marker.Length, marker.Length).SequenceEqual(marker)) s2 -= marker.Length;
+        if (e2 + marker.Length <= line.Length && line.AsSpan(e2, marker.Length).SequenceEqual(marker)) e2 += marker.Length;
+        if ((s2 != start || e2 != end) && line[s2..e2].Contains(marker, StringComparison.Ordinal))
+            candidates.Add(line[..s2] + marker + line[s2..e2].Replace(marker, "") + marker + line[e2..]);
         if (marker.Length > 1 && inner.Contains(marker, StringComparison.Ordinal))
             candidates.Add(line[..start] + marker + inner.Replace(marker, "") + marker + line[end..]);
         candidates.Add(line[..start] + marker + inner + marker + line[end..]);

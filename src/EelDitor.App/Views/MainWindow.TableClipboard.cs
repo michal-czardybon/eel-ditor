@@ -102,7 +102,8 @@ public partial class MainWindow
 
     private async Task PasteAsync()
     {
-        if (_markdown is null || Editor.IsReadOnly) { Editor.Paste(); return; }
+        if (Editor.IsReadOnly) return;
+        if (_markdown is null) { await PasteTextAsync(); return; }
         var (html, text) = await ReadClipboardAsync();
         var lines = MarkdownCommands.TableAtCaret(Editor, _markdown) is var (table, _, _) ? RowsToPaste(html, text, table.ColumnCount) : null;
         if (lines is { Count: > 0 } && MarkdownCommands.TableAtCaret(Editor, _markdown) is var (t, row, _))
@@ -116,7 +117,32 @@ public partial class MainWindow
             InsertNewTable(rows, TableClipboard.HasHeader(html));
             return;
         }
-        Editor.Paste();
+        await PasteTextAsync();
+    }
+
+    /// <summary>AvaloniaEdit's clipboard format for a rectangular (column) selection.</summary>
+    private const string RectangularFormat = "AvalonEditRectangularSelection";
+
+    /// <summary>
+    /// Pastes the clipboard text as it is, tabs included: AvaloniaEdit's own paste turns every tab into spaces when
+    /// "Insert spaces" is on, which changes the pasted text (TSV, Makefiles, aligned columns). Only the line endings
+    /// follow the document's, so a paste does not mix them. A rectangular copy still goes through AvaloniaEdit, which
+    /// pastes it as a block.
+    /// </summary>
+    private async Task PasteTextAsync()
+    {
+        if (Clipboard is not { } clipboard) { Editor.Paste(); return; }
+        try
+        {
+            if ((await clipboard.GetFormatsAsync()).Contains(RectangularFormat)) { Editor.Paste(); return; }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { } // a clipboard another program filled badly
+        if (await clipboard.TryGetTextAsync() is not { Length: > 0 } text || Editor.IsReadOnly) return;
+        var area = Editor.TextArea;
+        string newLine = AvaloniaEdit.Document.TextUtilities.GetNewLineFromDocument(Editor.Document, area.Caret.Line);
+        text = AvaloniaEdit.Document.TextUtilities.NormalizeNewLines(text, newLine);
+        area.Selection.ReplaceSelectionWithText(text);
+        area.Caret.BringCaretToView();
     }
 
     /// <summary>The Markdown rows to paste into a table of <paramref name="columns"/> columns, or null when the clipboard has none.</summary>

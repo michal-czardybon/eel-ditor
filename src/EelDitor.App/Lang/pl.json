@@ -477,5 +477,9 @@
   "Menu.View.PreviewTip": "Podgląd pliku HTML lub Markdown obok tekstu, rysowany przez sam Eel-ditor (bez przeglądarki: bez skryptów, CSS i treści z internetu). Odświeża się w trakcie pisania.",
   "Preview.NoFile": "Żaden plik nie jest otwarty.",
   "Preview.NotAvailable": "Podgląd jest dostępny dla plików HTML i Markdown.",
-  "Preview.TooLarge": "Plik jest za duży na podgląd."
+  "Preview.TooLarge": "Plik jest za duży na podgląd.",
+  "Menu.File.Print": "Drukuj…",
+  "Menu.File.PrintTip": "Otwiera dokument w domyślnej przeglądarce z oknem drukowania (podgląd wydruku, wybór drukarki, zapis do PDF).",
+  "Print.Opened": "Dokument otwarty w przeglądarce do druku.",
+  "Preview.Close": "Zamknij podgląd"
 }

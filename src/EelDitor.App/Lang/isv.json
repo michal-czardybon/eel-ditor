@@ -477,5 +477,9 @@
   "Menu.View.PreviewTip": "Podgled fajla HTML ili Markdown pri tekstu, pokazany samym redaktorom (bez prěgledky: bez skriptov, CSS i sodržanja iz interneta). Obnavjaje se pri pisanju.",
   "Preview.NoFile": "Nijedin fajl ne jest otvorjeny.",
   "Preview.NotAvailable": "Podgled jest možny za fajly HTML i Markdown.",
-  "Preview.TooLarge": "Fajl jest prěmnogo veliky za podgled."
+  "Preview.TooLarge": "Fajl jest prěmnogo veliky za podgled.",
+  "Menu.File.Print": "Pečataj…",
+  "Menu.File.PrintTip": "Otvarja dokument v prěgledkě s oknom pečatanja (podgled, izbor printera, zapis v PDF).",
+  "Print.Opened": "Dokument jest otvorjeny v prěgledkě za pečatanje.",
+  "Preview.Close": "Zatvori podgled"
 }

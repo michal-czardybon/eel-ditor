@@ -1112,9 +1112,6 @@ internal sealed class TableGridGenerator(MarkdownView view) : VisualLineElementG
     {
         var tv = view.Editor.TextArea.TextView;
         int available = Math.Max(20, (int)((WrapWidth.Of(tv) - 12) / Math.Max(1, tv.WideSpaceWidth)));
-        // The end-of-line mark (Show all characters) comes after the grid, on the same line: leave room for it, or
-        // it wraps onto a line of its own below every row.
-        if (tv.Options.ShowEndOfLine) available = Math.Max(20, available - 3);
         if (!ReferenceEquals(_model, view.Model) || available != _available)
         {
             _layouts.Clear();

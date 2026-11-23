@@ -64,17 +64,18 @@ public class TableGridTests
     public void WithAllCharactersShown_TheEndOfLineMarkStaysOnTheGridsLine()
     {
         var (w, _) = Open(wrap: true);
-        Assert.False(w.Editor.Options.ShowEndOfLine);
+        Assert.False(w.ShowsEndOfLine);
         w.RunCommand("view.eol");
-        Assert.True(w.Editor.Options.ShowEndOfLine);
+        Assert.True(w.ShowsEndOfLine);
+        Assert.False(w.Editor.Options.ShowEndOfLine); // the marks are drawn outside the layout (WhitespaceMarks)
         w.Editor.TextArea.TextView.Redraw();
         Dispatcher.UIThread.RunJobs();
         w.Editor.TextArea.TextView.EnsureVisualLines();
         // The mark follows the grid on the same text line instead of wrapping onto a line of its own.
         for (int n = 3; n <= 6; n++) Assert.Single(Line(w, n).TextLines);
-        // With room to spare: the mark's glyph may come from a wider fallback font.
+        // The grid fits the view (no room is kept for a mark: grid rows get none).
         var tv = w.Editor.TextArea.TextView;
-        for (int n = 3; n <= 6; n++) Assert.True(Line(w, n).TextLines[0].WidthIncludingTrailingWhitespace <= tv.Bounds.Width - 2 * tv.WideSpaceWidth);
+        for (int n = 3; n <= 6; n++) Assert.True(Line(w, n).TextLines[0].WidthIncludingTrailingWhitespace <= tv.Bounds.Width);
     }
 
     [AvaloniaFact]

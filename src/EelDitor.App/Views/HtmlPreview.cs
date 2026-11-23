@@ -26,6 +26,11 @@ public sealed class HtmlPreview : Border
     /// <summary>A click on a link that is not an anchor in the page (the address as written).</summary>
     public event Action<string>? LinkActivated;
 
+    /// <summary>The ✕ on the preview's bar was clicked.</summary>
+    public event Action? CloseRequested;
+
+    private readonly Button _close;
+
     public HtmlPreview()
     {
         _content = new StackPanel { Margin = new Thickness(20, 14, 20, 24) };
@@ -35,8 +40,27 @@ public sealed class HtmlPreview : Border
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
         };
-        Child = _scroll;
+        // A bar with the preview's name and ✕ to close it, like the bar of the current file.
+        _close = new Button { Content = "✕", Padding = new Thickness(10, 0), Background = Brushes.Transparent, VerticalAlignment = VerticalAlignment.Stretch };
+        ToolTip.SetTip(_close, Services.Loc.T("Preview.Close"));
+        _close.Click += (_, _) => CloseRequested?.Invoke();
+        var title = new TextBlock { Text = Services.Loc.T("Menu.View.Preview"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0) };
+        title.Res(TextBlock.ForegroundProperty, "DimTextBrush");
+        var bar = new DockPanel { Height = 26 };
+        DockPanel.SetDock(_close, Dock.Right);
+        bar.Children.Add(_close);
+        bar.Children.Add(title);
+        var barBorder = new Border { Child = bar, BorderThickness = new Thickness(0, 0, 0, 1) };
+        barBorder.Res(Border.BackgroundProperty, "PanelBrush").Res(Border.BorderBrushProperty, "BorderSubtleBrush");
+        var layout = new DockPanel();
+        DockPanel.SetDock(barBorder, Dock.Top);
+        layout.Children.Add(barBorder);
+        layout.Children.Add(_scroll);
+        Child = layout;
     }
+
+    /// <summary>The ✕ that closes the preview (tests).</summary>
+    internal Button CloseButton => _close;
 
     /// <summary>The controls of the rendered page (tests).</summary>
     internal StackPanel Content => _content;

@@ -67,6 +67,10 @@ test builds away from the running app's folder.
 - **Byte-exact round trip.** `TextFile` detects BOM → valid UTF-8 → heuristic/ANSI code page, and stores encoding + BOM.
   Saving writes the same. Tests check round trips for UTF-8 (±BOM), UTF-16 LE/BE, single-byte code pages, mixed EOL,
   no final newline.
+- **Tabs stay tabs.** The Tab key types a tab by default (width 4); "Insert spaces" is an option. **Pasted text is
+  inserted as it is**, tabs included, whatever that option says: AvaloniaEdit's paste turned every tab into spaces,
+  changing TSV data, Makefiles and aligned text (principle 1). Only a rectangular copy goes through AvaloniaEdit's
+  paste (it pastes a block). Dragged text is still AvaloniaEdit's (with "Insert spaces" on, its tabs become spaces).
 - **Line endings.** The dominant EOL becomes the document's EOL; new lines and pasted text get it. Mixed EOL shows a
   warning bar with an explicit "unify" action — never automatic. EOL conversion is an explicit menu command.
 - **Encoding menu has two different operations:** "reopen as" (reinterpret bytes) and "convert to" (change how it is
@@ -138,6 +142,14 @@ copying a bold fragment must not produce visible stray stars on paste.
 - Edit → Convert style (highlight ↔ bold ↔ italic) rewrites only the markers of each span (`==a==` → `**a**`), in the
   selection or the whole file, as one undo step; each span is verified the same way and skipped (and counted) when
   the change would alter what the line shows. Code blocks and code spans are not touched.
+- **On or off** (Ctrl+B and the like): off when every selected letter and digit already has the style; punctuation
+  and spaces do not count. A selection of `**adjective agreement**:` up to the line end takes the plain colon, and the
+  user means the bold words (it used to add bold instead, writing `****…**:**`, which looked like nothing happened).
+  Adding a style to a partly styled range takes in the markers right at its edges, so they do not pile up.
+- Taking a style off **part of a span** closes it before the range and opens it again after it. Punctuation left alone
+  at an edge of the span goes with the range (`**Ważna uwaga:**` without "uwaga" → `**Ważna** uwaga:`): a marker
+  between a letter and punctuation opens nothing (`uwaga**:**` would show the stars), and the old fallback took the
+  style off the whole span instead. Bold written `__…__` and italic `_…_` come off with Ctrl+B / Ctrl+I like `**`/`*`.
 - **Clear formatting** (Ctrl+Space, Markdown menu, context menu) removes every inline style and link from the
   selection (or the spans at the caret). Part of a span is taken out of it (`**ab**cd**ef**`); a link goes only as a
   whole, keeping its text. Headings and lists are block formatting and stay.
@@ -366,12 +378,22 @@ diff-friendly mode.
   export HTML instead.
 - Privacy: the page has a Content-Security-Policy allowing only local files (`img-src file: data:`), so remote
   images are not fetched; relative image paths resolve through `<base href>` to the document's folder.
+- **File → Print** (trial): the same page (an HTML file: the file itself, with `<base href>` added) goes to a temporary
+  file opened in the default browser, with one inline script that opens the browser's print dialog (print preview,
+  printer, margins, Save as PDF). **Why:** Avalonia has no printing; the browser's dialog is better than anything we
+  would draw, and no library is added. The export pages stay without scripts.
 
 ## 10b. Preview (HTML and Markdown)
 
 - View → HTML preview (Ctrl+Shift+V, as in VS Code) shows the current file rendered **on the right of the text**: an
-  HTML file as itself, a Markdown file through `MarkdownHtml` (the same HTML as the export). It follows typing after
-  300 ms and keeps its scroll position; its width and visibility are remembered. Trial since 2026-11-23.
+  HTML file as itself, a Markdown file through `MarkdownHtml` (the same HTML as the export). It keeps its scroll position;
+  its width and visibility are remembered; ✕ on its bar closes it. Trial since 2026-11-23.
+- **Live, without blocking typing or burning a core:** a change only marks the preview dirty (a flag, not a queue: only
+  the newest text matters); at most one rendering is pending; it runs at background priority, after input; the pause
+  before the next one is twice the time the last one took (at least a frame), so a small file follows every keystroke
+  and a large one slows down by itself (about a third of a core at most); nothing runs while the preview is hidden or
+  the window minimized. **Why not a fixed delay:** a 300 ms debounce never updated during continuous typing. Later, if
+  large files need it: parse in the background and replace only the changed blocks.
 - **Drawn by Eel-ditor itself, not by a browser engine:** `HtmlParser` (Core, forgiving, implied end tags, entities)
   builds a tree and `HtmlRenderer` turns it into Avalonia text blocks, lists, tables (colspan/rowspan), code blocks,
   quotes and images. **Why:** principle 6 (no embedded browser, single light executable) and 7 (nothing runs, nothing
@@ -408,6 +430,7 @@ diff-friendly mode.
 | Elements covering N chars with 1 column shift hit-testing | `WholeElement`: one visual column per source character |
 | Line heights are known only after drawing | `LineHeightPrimer` |
 | `TextView.Bounds` holds the old width while a resized view builds its lines | grids take the wrap width from the private `_lastAvailableSize` (`WrapWidth`), set before any line is built; with Bounds every resize showed the previous width's columns and rows built at other times differed (a jagged table) |
+| "Show all characters" marks (ShowSpaces/ShowTabs/ShowEndOfLine) are elements in the line: ␍ ␊ are missing from Consolas, so a fallback font with a taller line changed line heights; a space mark is a normal-size space, so headings got narrower | `WhitespaceMarks` draws ·, → and ␍␊ beside the text, outside the layout; AvaloniaEdit's options stay off |
 | Table rows are repainted often (scrolling, caret, height primer) | `TableRowRun` shapes its text once and keeps it until the row is rebuilt |
 | `Application.FindResource` cannot see theme dictionaries | `Themed` binds code-built controls to theme resources |
 

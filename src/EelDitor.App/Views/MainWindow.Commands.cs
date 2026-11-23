@@ -203,6 +203,7 @@ public partial class MainWindow
         Add("file.closeOthers", "Menu.File.CloseOthers", () => _ = CloseManyAsync(_files.Documents.Where(d => !ReferenceEquals(d, _active))));
         Add("file.exportPdf", "Export.Pdf", () => _ = ExportAsync(pdf: true), null, () => _active is not null);
         Add("file.exportHtml", "Export.Html", () => _ = ExportAsync(pdf: false), null, () => _active is not null);
+        Add("file.print", "Menu.File.Print", PrintInBrowser, null, () => _active is not null, tooltipKey: "Menu.File.PrintTip");
         Add("file.copyPath", "Menu.File.CopyPath", () => _ = CopyToClipboardAsync(_active?.FilePath), null, () => _active?.FilePath is not null);
         Add("file.reveal", "Menu.File.Reveal", () => RevealInFileManager(_active?.FilePath), null, () => _active?.FilePath is not null);
         Add("file.exit", "Menu.File.Exit", Close, ["Alt+F4"]);
@@ -275,9 +276,9 @@ public partial class MainWindow
 
         // View
         Add("view.wrap", "Menu.View.WordWrap", ToggleWordWrap, ["Alt+Z"], isChecked: () => Editor.WordWrap);
-        Add("view.whitespace", "Menu.View.ShowWhitespace", () => SetWhitespace(!Editor.Options.ShowSpaces, Editor.Options.ShowEndOfLine), null, () => true, () => Editor.Options.ShowSpaces);
-        Add("view.eol", "Menu.View.ShowEol", () => SetWhitespace(Editor.Options.ShowSpaces, !Editor.Options.ShowEndOfLine), null, () => true, () => Editor.Options.ShowEndOfLine);
-        Add("view.allChars", "Menu.View.ShowAll", ToggleAllCharacters, ["Ctrl+Shift+8"], isChecked: () => Editor.Options.ShowSpaces && Editor.Options.ShowEndOfLine);
+        Add("view.whitespace", "Menu.View.ShowWhitespace", () => SetWhitespace(!ShowsSpaces, ShowsEndOfLine), null, () => true, () => ShowsSpaces);
+        Add("view.eol", "Menu.View.ShowEol", () => SetWhitespace(ShowsSpaces, !ShowsEndOfLine), null, () => true, () => ShowsEndOfLine);
+        Add("view.allChars", "Menu.View.ShowAll", ToggleAllCharacters, ["Ctrl+Shift+8"], isChecked: () => ShowsSpaces && ShowsEndOfLine);
         Add("view.lineNumbers", "Menu.View.LineNumbers", ToggleLineNumbers, null, isChecked: () => Editor.ShowLineNumbers);
         Add("view.currentLine", "Menu.View.CurrentLine", ToggleCurrentLine, null, isChecked: () => _settings.HighlightCurrentLine);
         Add("view.sidebar", "Menu.View.Sidebar", ToggleSidebar, ["Ctrl+Shift+B", "Ctrl+Alt+L"], isChecked: () => MainGrid.ColumnDefinitions[0].Width.Value > 0);
@@ -408,7 +409,7 @@ public partial class MainWindow
         MainMenu.Items.Add(Sub("Menu.File",
             Item("file.new"), Item("file.open"), _recentMenu, Item("file.reload"), Sep(),
             Item("file.save"), Item("file.saveAs"), Item("file.saveAll"), Sep(),
-            Item("file.exportPdf"), Item("file.exportHtml"), Sep(),
+            Item("file.exportPdf"), Item("file.exportHtml"), Item("file.print"), Sep(),
             Item("file.close"), Item("file.closeOthers"), Item("file.closeAll"), Sep(),
             Item("file.copyPath"), Item("file.reveal"), Item("file.console"), Sep(),
             Item("file.exit")));

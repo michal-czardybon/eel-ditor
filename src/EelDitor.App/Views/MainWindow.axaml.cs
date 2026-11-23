@@ -299,14 +299,9 @@ public partial class MainWindow : Window
         o.EnableHyperlinks = false;
         o.EnableEmailHyperlinks = false;
         o.AllowScrollBelowDocument = true;
-        o.ShowSpaces = _settings.ShowSpacesAndTabs;
-        o.ShowTabs = _settings.ShowSpacesAndTabs;
-        o.ShowEndOfLine = _settings.ShowEndOfLine;
-        o.EndOfLineCRLFGlyph = "␍␊";
-        o.EndOfLineLFGlyph = "␊";
-        o.EndOfLineCRGlyph = "␍";
-        o.ShowSpacesGlyph = "·";
-        o.ShowTabsGlyph = "→";
+        // Marks for spaces, tabs and line ends are drawn outside the text layout (AvaloniaEdit's own changed line
+        // heights and the width of headings).
+        _whitespaceMarks = new EelDitor.App.Editor.WhitespaceMarks(Editor) { Spaces = _settings.ShowSpacesAndTabs, LineEnds = _settings.ShowEndOfLine };
         o.IndentationSize = _settings.TabSize;
         o.ConvertTabsToSpaces = _settings.UseSpaces;
         o.CutCopyWholeLine = true;
@@ -358,6 +353,7 @@ public partial class MainWindow : Window
         Editor.TextArea.SelectionBrush = p.Selection;
         Editor.TextArea.SelectionForeground = null;
         Editor.TextArea.TextView.NonPrintableCharacterBrush = p.Whitespace;
+        if (_whitespaceMarks is not null) _whitespaceMarks.Brush = p.Whitespace;
         var tmTheme = p == EditorPalette.Light ? ThemeName.LightPlus : ThemeName.DarkPlus;
         _textMate.SetTheme(_textMateRegistry.LoadTheme(tmTheme));
         // TextMate applies the theme's own background; keep ours so the editor matches the window chrome.

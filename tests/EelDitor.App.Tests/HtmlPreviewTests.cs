@@ -142,12 +142,44 @@ public class HtmlPreviewTests
         Dispatcher.UIThread.RunJobs();
         Assert.Contains(Blocks(w.Preview!.Content), b => Text(b) == heading);
 
+        // Live: the change shows after the next background turn of the dispatcher, without a pause in typing.
         doc.Document.Insert(doc.Document.TextLength, name.EndsWith(".md") ? "\nnowy akapit\n" : "<p>nowy akapit</p>");
-        w.UpdatePreviewNow(); // the timer would do it 300 ms later
+        Dispatcher.UIThread.RunJobs();
         Assert.Contains(Blocks(w.Preview.Content), b => Text(b) == "nowy akapit");
+        // The next change, a moment later, too (the pause after a rendering is twice its time, at least a frame).
+        Thread.Sleep(300);
+        doc.Document.Insert(doc.Document.TextLength, name.EndsWith(".md") ? "\ndrugi akapit\n" : "<p>drugi akapit</p>");
+        Dispatcher.UIThread.RunJobs();
+        Assert.Contains(Blocks(w.Preview.Content), b => Text(b) == "drugi akapit");
 
         w.RunCommand("view.preview");
         Assert.False(w.PreviewVisible);
+    }
+
+    [AvaloniaFact]
+    public void Preview_ClosesWithItsCross()
+    {
+        var (w, _) = Open("a.md", "# A\n");
+        w.RunCommand("view.preview");
+        Assert.True(w.PreviewVisible);
+        w.Preview!.CloseButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+        Assert.False(w.PreviewVisible);
+    }
+
+    [AvaloniaTheory]
+    [InlineData("a.md", "# Tytuł\n\ntekst **gruby**\n", "<h1>Tytuł</h1>")]
+    [InlineData("a.txt", "zwykły <tekst>\n", "zwykły &lt;tekst&gt;")]
+    [InlineData("a.html", "<html><head><title>T</title></head><body><p>akapit</p></body></html>", "<p>akapit</p>")]
+    public void PrintPage_OpensThePrintDialog_AndKeepsTheContent(string name, string text, string expected)
+    {
+        var (_, doc) = Open(name, text);
+        string page = MainWindow.PrintHtml(doc);
+        Assert.Contains(expected, page);
+        Assert.Contains(EelDitor.Markdown.MarkdownHtml.PrintScript, page);
+        Assert.True(page.IndexOf(EelDitor.Markdown.MarkdownHtml.PrintScript, StringComparison.Ordinal) < page.LastIndexOf("</body>", StringComparison.Ordinal));
+        Assert.Contains("<base href=\"file:///", page); // relative images and links resolve to the file's folder
+        if (!name.EndsWith(".html")) Assert.Contains("script-src 'unsafe-inline'", page);
+        Assert.DoesNotContain("window.print", MainWindow.ExportHtml(doc)); // the export stays without scripts
     }
 
     [AvaloniaFact]

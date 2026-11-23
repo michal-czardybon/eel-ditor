@@ -14,17 +14,27 @@ public partial class MainWindow
     internal const int PreviewMaxLength = 3_000_000;
 
     private HtmlPreview? _preview;
-    private DispatcherTimer? _previewTimer;
+
+    // Live updates (see SchedulePreview): a flag rather than a queue, since only the newest text matters.
+    private bool _previewDirty, _previewPosted;
+    private DateTime _previewNextAllowed = DateTime.MinValue;
+    private DispatcherTimer? _previewWait;
+
+    /// <summary>Shortest pause between two renderings (about a frame).</summary>
+    private static readonly TimeSpan PreviewMinInterval = TimeSpan.FromMilliseconds(16);
 
     private void SetupPreview()
     {
         _preview = new HtmlPreview();
         _preview.LinkActivated += url => { if (_active is { } doc) _ = OpenLinkAsync(url, doc); };
+        _preview.CloseRequested += () => SetPreviewVisible(false);
         PreviewHost.Child = _preview;
-        _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
-        _previewTimer.Tick += (_, _) => { _previewTimer.Stop(); UpdatePreviewNow(); };
+        _previewWait = new DispatcherTimer(DispatcherPriority.Background);
+        _previewWait.Tick += (_, _) => { _previewWait.Stop(); PostPreview(); };
         Editor.TextChanged += (_, _) => SchedulePreview();
         Editor.DocumentChanged += (_, _) => SchedulePreview();
+        // A minimized window draws nothing: the preview catches up when the window is shown again.
+        PropertyChanged += (_, e) => { if (e.Property == WindowStateProperty && WindowState != WindowState.Minimized) SchedulePreview(); };
         if (_settings.PreviewVisible) SetPreviewVisible(true);
     }
 
@@ -57,11 +67,43 @@ public partial class MainWindow
         RefreshCommandStates();
     }
 
+    /// <summary>
+    /// Live preview after every change, without blocking typing or burning a core:
+    /// - a change only marks the preview dirty; at most one rendering is pending, and it takes the newest text;
+    /// - the rendering runs at background priority, after keyboard input and the editor's own layout;
+    /// - the pause before the next rendering is twice the time the last one took (at least a frame), so a small file
+    ///   follows every keystroke and a large one slows down by itself, never taking more than about a third of a core;
+    /// - nothing is rendered while the preview is hidden or the window minimized.
+    /// </summary>
     private void SchedulePreview()
     {
-        if (_previewTimer is null || !PreviewVisible) return;
-        _previewTimer.Stop();
-        _previewTimer.Start();
+        if (_preview is null || !PreviewVisible) return;
+        _previewDirty = true;
+        if (_previewPosted || _previewWait?.IsEnabled == true) return;
+        var wait = _previewNextAllowed - DateTime.UtcNow;
+        if (wait > TimeSpan.Zero)
+        {
+            _previewWait!.Interval = wait;
+            _previewWait.Start();
+        }
+        else PostPreview();
+    }
+
+    private void PostPreview()
+    {
+        if (_previewPosted) return;
+        _previewPosted = true;
+        Dispatcher.UIThread.Post(RenderPreviewIfDirty, DispatcherPriority.Background);
+    }
+
+    private void RenderPreviewIfDirty()
+    {
+        _previewPosted = false;
+        if (!_previewDirty || !PreviewVisible || WindowState == WindowState.Minimized) return;
+        var started = DateTime.UtcNow;
+        UpdatePreviewNow();
+        var took = DateTime.UtcNow - started;
+        _previewNextAllowed = DateTime.UtcNow + (took * 2 > PreviewMinInterval ? took * 2 : PreviewMinInterval);
     }
 
     /// <summary>Whether a document is HTML (by extension or "Display as").</summary>
@@ -76,7 +118,7 @@ public partial class MainWindow
     internal void UpdatePreviewNow()
     {
         if (_preview is null || !PreviewVisible) return;
-        _previewTimer?.Stop();
+        _previewDirty = false;
         var palette = Palette;
         if (_active is not { } doc) { _preview.ShowMessage(Loc.T("Preview.NoFile"), palette); return; }
         if (doc.Document.TextLength > PreviewMaxLength) { _preview.ShowMessage(Loc.T("Preview.TooLarge"), palette); return; }
