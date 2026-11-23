@@ -46,7 +46,8 @@ public class LocalizationTests
         Assert.Equal("Anuluj", isv["Button.Cancel"]);
         Assert.Equal("Izsěči", isv["Menu.Edit.Cut"]);
         Assert.Equal("Kopijuj", isv["Menu.Edit.Copy"]);
-        Assert.Equal("Iznova pročitaj iz diska", isv["Menu.File.Reload"]);
+        Assert.Equal("Vrati", isv["Menu.Edit.Undo"]);
+        Assert.Equal("Iznova včitaj iz diska", isv["Menu.File.Reload"]);
         foreach (var (key, text) in isv)
         {
             Assert.DoesNotContain("prěčrk", text);
@@ -54,6 +55,9 @@ public class LocalizationTests
             Assert.DoesNotContain("opir", text); // kopiruj / kopirovano (preferred: kopijuj / kopijovano)
             Assert.DoesNotContain(" s diska", text);
             Assert.DoesNotContain("v vs", text);
+            Assert.DoesNotContain("apk", text);   // katalog, not papka
+            Assert.DoesNotContain("robel", text); // prostranne klaviše
+            Assert.DoesNotContain("pročitaj", text.Replace("Izberi", "")); // iznova včitaj
             Assert.DoesNotContain("odstranjenje togda", text);
             // Menu and button labels are imperatives, not infinitives.
             if ((key.StartsWith("Menu.") || key.StartsWith("Button.")) && !text.Contains('?'))
