@@ -114,7 +114,7 @@ internal sealed class LineHeightPrimer
     {
         if (line.Length == 0) return false;
         var tv = _editor.TextArea.TextView;
-        if (_editor.WordWrap && line.Length * tv.WideSpaceWidth > tv.Bounds.Width - 4 * tv.WideSpaceWidth) return true;
+        if (_editor.WordWrap && line.Length * tv.WideSpaceWidth > WrapWidth.Of(tv) - 4 * tv.WideSpaceWidth) return true;
         if (_view.TablesAsGrid && _view.Model.TableAtLine(line.LineNumber - 1) is not null) return true;
         var render = _view.RenderFor(line);
         return render.Kind != MdLineKind.Normal || render.Hidden.Count > 0 || render.Styles.Count > 0;

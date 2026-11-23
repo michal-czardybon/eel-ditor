@@ -407,6 +407,8 @@ diff-friendly mode.
 | Lines longer than `VisualLine.LENGTH_LIMIT` (3000) run no element generators | `LongLineGenerators` (first line transformer) rebuilds the elements with AvaloniaEdit's own algorithm and `ReplaceElement`; text run properties set via the internal `SetTextRunProperties` by reflection; if that is missing, the colorizer's fallback collapses markers |
 | Elements covering N chars with 1 column shift hit-testing | `WholeElement`: one visual column per source character |
 | Line heights are known only after drawing | `LineHeightPrimer` |
+| `TextView.Bounds` holds the old width while a resized view builds its lines | grids take the wrap width from the private `_lastAvailableSize` (`WrapWidth`), set before any line is built; with Bounds every resize showed the previous width's columns and rows built at other times differed (a jagged table) |
+| Table rows are repainted often (scrolling, caret, height primer) | `TableRowRun` shapes its text once and keeps it until the row is rebuilt |
 | `Application.FindResource` cannot see theme dictionaries | `Themed` binds code-built controls to theme resources |
 
 ---

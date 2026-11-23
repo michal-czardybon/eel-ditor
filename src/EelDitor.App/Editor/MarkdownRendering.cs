@@ -13,6 +13,21 @@ using EelDitor.Markdown;
 
 namespace EelDitor.App.Editor;
 
+/// <summary>
+/// The width AvaloniaEdit wraps lines at. <c>TextView.Bounds</c> is updated only after layout, so while a resized view
+/// builds its lines it still holds the old width; grids built from it were one resize behind, and rows built at
+/// different times (in view, by the height primer, after scrolling) got different column widths. The measured width
+/// is in the private <c>_lastAvailableSize</c>, set before any line is built (read by reflection; Bounds if missing).
+/// </summary>
+internal static class WrapWidth
+{
+    private static readonly System.Reflection.FieldInfo? LastAvailableSize =
+        typeof(TextView).GetField("_lastAvailableSize", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+    public static double Of(TextView tv) =>
+        LastAvailableSize?.GetValue(tv) is Size size && size.Width > 0 && !double.IsInfinity(size.Width) ? size.Width : tv.Bounds.Width;
+}
+
 /// <summary>Adapts an AvaloniaEdit document to the Markdown parser's line source.</summary>
 public sealed class DocumentLineSource(TextDocument document) : ILineSource
 {
@@ -1096,7 +1111,7 @@ internal sealed class TableGridGenerator(MarkdownView view) : VisualLineElementG
     public TableGridLayout Layout(MarkdownTable table)
     {
         var tv = view.Editor.TextArea.TextView;
-        int available = Math.Max(20, (int)((tv.Bounds.Width - 12) / Math.Max(1, tv.WideSpaceWidth)));
+        int available = Math.Max(20, (int)((WrapWidth.Of(tv) - 12) / Math.Max(1, tv.WideSpaceWidth)));
         // The end-of-line mark (Show all characters) comes after the grid, on the same line: leave room for it, or
         // it wraps onto a line of its own below every row.
         if (tv.Options.ShowEndOfLine) available = Math.Max(20, available - 3);
@@ -1303,25 +1318,46 @@ internal sealed class TableRowRun(TextRunProperties properties, double charWidth
 {
     public override TextRunProperties Properties { get; } = properties;
 
-    public override Size Size => new((lines.Count == 0 ? 1 : lines.Max(l => l.Text.Length)) * charWidth, Math.Max(1, lines.Count) * lineHeight);
+    private readonly int _columns = lines.Count == 0 ? 1 : lines.Max(l => l.Text.Length);
+
+    public override Size Size => new(_columns * charWidth, Math.Max(1, lines.Count) * lineHeight);
 
     public override double Baseline => lineHeight * 0.8;
 
+    /// <summary>
+    /// The shaped text, built on the first draw and kept: a row is repainted many times (scrolling, the caret, the
+    /// height primer moving the view) but its text changes only when the row is built again.
+    /// </summary>
+    private (List<(IBrush Brush, Rect Rect)> Fills, List<(FormattedText Text, Point At)> Texts)? _shaped;
+
     public override void Draw(DrawingContext context, Point origin)
+    {
+        var (fills, texts) = _shaped ??= Build();
+        var offset = new Vector(origin.X, origin.Y);
+        foreach (var (brush, rect) in fills) context.FillRectangle(brush, rect.Translate(offset));
+        foreach (var (text, at) in texts) context.DrawText(text, at + offset);
+    }
+
+    /// <summary>Shapes the row once: the frame lines and every styled run, at positions relative to the run's origin.</summary>
+    private (List<(IBrush Brush, Rect Rect)> Fills, List<(FormattedText Text, Point At)> Texts) Build()
     {
         var tf = Properties.Typeface;
         double size = Properties.FontRenderingEmSize;
         var culture = System.Globalization.CultureInfo.CurrentCulture;
-        var bold = new Typeface(tf.FontFamily, tf.Style, FontWeight.Bold, tf.Stretch);
         // Not the run's brush: the Markdown colorizer dims the pipes, which are part of this element.
         var textBrush = kind == MdLineKind.TableHeader ? palette.Accent : palette.Foreground;
+        var fills = new List<(IBrush, Rect)>();
+        var texts = new List<(FormattedText, Point)>();
+        var faces = new Dictionary<(FontStyle, FontWeight), Typeface>();
+        Typeface Face(FontStyle style, FontWeight weight) =>
+            faces.TryGetValue((style, weight), out var f) ? f : faces[(style, weight)] = new Typeface(tf.FontFamily, style, weight, tf.Stretch);
         for (int i = 0; i < lines.Count; i++)
         {
             var line = lines[i];
-            double y = origin.Y + i * lineHeight;
+            double y = i * lineHeight;
             var frame = new FormattedText(line.Text, culture, FlowDirection.LeftToRight, tf, size, palette.Dim);
             double dy = (lineHeight - frame.Height) / 2;
-            context.DrawText(frame, new Point(origin.X, y + dy));
+            texts.Add((frame, new Point(0, y + dy)));
             if (line.Cells is null) continue;
             foreach (var (column, text) in line.Cells)
             {
@@ -1335,29 +1371,33 @@ internal sealed class TableRowRun(TextRunProperties properties, double charWidth
                     string run = text.Text[k..j];
                     int width = TextWidth.Of(run);
                     bool isBold = kind == MdLineKind.TableHeader || style.HasFlag(MdStyle.Bold);
-                    var face = new Typeface(tf.FontFamily, style.HasFlag(MdStyle.Italic) || style.HasFlag(MdStyle.Image) ? FontStyle.Italic : tf.Style,
-                        isBold ? FontWeight.Bold : tf.Weight, tf.Stretch);
+                    var face = Face(style.HasFlag(MdStyle.Italic) || style.HasFlag(MdStyle.Image) ? FontStyle.Italic : tf.Style,
+                        isBold ? FontWeight.Bold : tf.Weight);
                     IBrush brush = style.HasFlag(MdStyle.Code) ? palette.CodeForeground
                         : style.HasFlag(MdStyle.Link) || style.HasFlag(MdStyle.Footnote) ? palette.Accent
                         : style.HasFlag(MdStyle.TaskDone) || style.HasFlag(MdStyle.Image) ? palette.Dim
                         : textBrush;
-                    var rect = new Rect(origin.X + x * charWidth, y, width * charWidth, lineHeight);
-                    if (style.HasFlag(MdStyle.Code)) context.FillRectangle(palette.CodeBackground, rect);
-                    if (style.HasFlag(MdStyle.Highlight)) context.FillRectangle(palette.Highlight, rect);
+                    var rect = new Rect(x * charWidth, y, width * charWidth, lineHeight);
+                    if (style.HasFlag(MdStyle.Code)) fills.Add((palette.CodeBackground, rect));
+                    if (style.HasFlag(MdStyle.Highlight)) fills.Add((palette.Highlight, rect));
                     // Sub- and superscripts: smaller and shifted, but in their own cells, so the grid stays aligned.
                     bool sub = style.HasFlag(MdStyle.Subscript), sup = style.HasFlag(MdStyle.Superscript);
                     var ft = new FormattedText(run, culture, FlowDirection.LeftToRight, face, sub || sup ? size * 0.75 : size, brush);
                     if (style.HasFlag(MdStyle.Strike)) ft.SetTextDecorations(TextDecorations.Strikethrough);
                     else if (style.HasFlag(MdStyle.Link)) ft.SetTextDecorations(TextDecorations.Underline);
                     double shift = sup ? -lineHeight * 0.12 : sub ? lineHeight * 0.22 : 0;
-                    context.DrawText(ft, new Point(rect.X, y + dy + shift));
+                    texts.Add((ft, new Point(rect.X, y + dy + shift)));
                     x += width;
                     k = j;
                 }
             }
         }
+        return (fills, texts);
     }
 }
+
+
+
 
 
 /// <summary>A horizontal rule line (<c>---</c>): its characters are replaced by one empty element; <see cref="RuleRenderer"/> draws the line.</summary>
