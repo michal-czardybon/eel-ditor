@@ -472,5 +472,10 @@
   "Wrap.Split120": "Convert to 120 columns",
   "Wrap.Split80": "Convert to 80 columns",
   "Wrap.SplitSentences": "Convert to sentence per line",
-  "Wrap.Tip": "How new paragraphs are broken while typing. Existing paragraphs are left as they are (clean git history); Alt+Q reflows a paragraph on request."
+  "Wrap.Tip": "How new paragraphs are broken while typing. Existing paragraphs are left as they are (clean git history); Alt+Q reflows a paragraph on request.",
+  "Menu.View.Preview": "HTML preview",
+  "Menu.View.PreviewTip": "A preview of an HTML or Markdown file next to the text, drawn by Eel-ditor itself (no browser: no scripts, CSS or content from the internet). It follows your typing.",
+  "Preview.NoFile": "No file is open.",
+  "Preview.NotAvailable": "The preview is available for HTML and Markdown files.",
+  "Preview.TooLarge": "The file is too large to preview."
 }

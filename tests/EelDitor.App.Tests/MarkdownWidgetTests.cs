@@ -13,7 +13,7 @@ namespace EelDitor.App.Tests;
 /// <summary>Task boxes and image previews in the real editor.</summary>
 public class MarkdownWidgetTests
 {
-    private const string OnePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    internal const string OnePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
     private static (MainWindow W, EditorDocument Doc) Open(string name, string text, Action<string>? prepare = null)
     {

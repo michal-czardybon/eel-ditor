@@ -472,5 +472,10 @@
   "Wrap.Split120": "Konwertuj na 120 kolumn",
   "Wrap.Split80": "Konwertuj na 80 kolumn",
   "Wrap.SplitSentences": "Konwertuj na zdanie w linii",
-  "Wrap.Tip": "Jak łamać nowe akapity podczas pisania. Istniejące akapity zostają bez zmian (czysta historia w gicie); Alt+Q przeformatowuje akapit na żądanie."
+  "Wrap.Tip": "Jak łamać nowe akapity podczas pisania. Istniejące akapity zostają bez zmian (czysta historia w gicie); Alt+Q przeformatowuje akapit na żądanie.",
+  "Menu.View.Preview": "Podgląd HTML",
+  "Menu.View.PreviewTip": "Podgląd pliku HTML lub Markdown obok tekstu, rysowany przez sam Eel-ditor (bez przeglądarki: bez skryptów, CSS i treści z internetu). Odświeża się w trakcie pisania.",
+  "Preview.NoFile": "Żaden plik nie jest otwarty.",
+  "Preview.NotAvailable": "Podgląd jest dostępny dla plików HTML i Markdown.",
+  "Preview.TooLarge": "Plik jest za duży na podgląd."
 }

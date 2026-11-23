@@ -404,6 +404,7 @@ public partial class MainWindow
     {
         Editor.FontSize = step == 0 ? 13 : Math.Clamp(Editor.FontSize + step, 6, 48);
         _settings.FontSize = Editor.FontSize;
+        SchedulePreview();
         _diffView?.SetFontSize(Editor.FontSize);
         _diffLinePanel?.SetFont(Editor.FontFamily, Editor.FontSize);
         SetStatusMessage($"{Editor.FontSize:0} pt");

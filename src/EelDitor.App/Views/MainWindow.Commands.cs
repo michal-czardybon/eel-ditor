@@ -339,6 +339,7 @@ public partial class MainWindow
         Add("view.filesPanel", "Menu.View.FilesPanel", () => ShowSideTab(FilesTab), ["Ctrl+Shift+E", "Ctrl+Alt+E"]);
         Add("view.gitPanel", "Menu.View.GitPanel", () => ShowSideTab(GitTab), ["Ctrl+Shift+G", "Ctrl+Alt+G"]);
         Add("view.map", "Menu.View.DocumentMap", () => ShowSideTab(MapTab), ["Ctrl+Shift+J", "Ctrl+Alt+M"]);
+        Add("view.preview", "Menu.View.Preview", TogglePreview, ["Ctrl+Shift+V"], isChecked: () => PreviewVisible, tooltipKey: "Menu.View.PreviewTip");
         Add("help.about", "Menu.Help.About", () => _ = Dialogs.Info(this, AppInfo.Name, Loc.T("About.Text", typeof(App).Assembly.GetName().Version?.ToString(3) ?? "")));
 
         _keyMap.ChordStateChanged += chord => StatusMessage.Text = chord is null ? "" : Loc.T("Status.Chord", chord);
@@ -442,7 +443,7 @@ public partial class MainWindow
             Item("view.wrap"), Item("md.raw"), Sep(),
             Item("view.whitespace"), Item("view.eol"), Item("view.allChars"), Sep(),
             Item("view.lineNumbers"), Item("view.currentLine"), Sep(),
-            Item("view.sidebar"), Item("view.filesPanel"), Item("view.gitPanel"), Item("view.map"), Item("view.results"), Item("view.filter"), Item("view.goToFile"), Item("view.nextDoc"), Item("view.prevDoc"), Sep(),
+            Item("view.sidebar"), Item("view.filesPanel"), Item("view.gitPanel"), Item("view.map"), Item("view.preview"), Item("view.results"), Item("view.filter"), Item("view.goToFile"), Item("view.nextDoc"), Item("view.prevDoc"), Sep(),
             Item("view.zoomIn"), Item("view.zoomOut"), Item("view.zoomReset"), Sep(),
             Sub("Menu.View.Theme", Item("view.themeDark"), Item("view.themeSystem"), Item("view.themeLight"))));
 

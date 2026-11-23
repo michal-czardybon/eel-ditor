@@ -42,6 +42,9 @@ public sealed class AppSettings
     public int LargeFileThresholdMb { get; set; } = 10;
 
     public double SidebarWidth { get; set; } = 260;
+    /// <summary>The HTML / Markdown preview on the right of the text, and its width.</summary>
+    public bool PreviewVisible { get; set; }
+    public double PreviewWidth { get; set; } = 520;
     public double WindowWidth { get; set; } = 1280;
     public double WindowHeight { get; set; } = 820;
     public double? WindowX { get; set; }

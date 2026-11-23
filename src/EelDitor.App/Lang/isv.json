@@ -472,5 +472,10 @@
   "Wrap.Split120": "Konvertuj na 120 kolon",
   "Wrap.Split80": "Konvertuj na 80 kolon",
   "Wrap.SplitSentences": "Konvertuj na rěčenje v liniji",
-  "Wrap.Tip": "Kako lomiti nove paragrafy pri pisanju. Jestvujuče paragrafy ostavajut bez izměn (čista historija v gitu); Alt+Q nanovo razlagaje paragraf po prosbě."
+  "Wrap.Tip": "Kako lomiti nove paragrafy pri pisanju. Jestvujuče paragrafy ostavajut bez izměn (čista historija v gitu); Alt+Q nanovo razlagaje paragraf po prosbě.",
+  "Menu.View.Preview": "Podgled HTML",
+  "Menu.View.PreviewTip": "Podgled fajla HTML ili Markdown pri tekstu, pokazany samym redaktorom (bez prěgledky: bez skriptov, CSS i sodržanja iz interneta). Obnavjaje se pri pisanju.",
+  "Preview.NoFile": "Nijedin fajl ne jest otvorjeny.",
+  "Preview.NotAvailable": "Podgled jest možny za fajly HTML i Markdown.",
+  "Preview.TooLarge": "Fajl jest prěmnogo veliky za podgled."
 }

@@ -23,7 +23,7 @@ PROTECTED = re.compile(r"""
   | \(git[^)]*\)
   | (?:Ctrl|Alt|Shift)(?:\+(?:Ctrl|Alt|Shift|Enter|Tab|Esc|[A-Za-z0-9]\b))+
   | \b(?:Explorer|[Gg]it|[Cc]ommit)\w*
-  | \b(?:Ctrl|Alt|Shift|Enter|Esc|Tab|OK|MB|CR\ LF|CR|LF|TSV|HTML|PDF|PATH|UTF-8|HEAD|Markdown|Windows|Unix|Mac|Word
+  | \b(?:Ctrl|Alt|Shift|Enter|Esc|Tab|OK|MB|CR\ LF|CR|LF|TSV|HTML|CSS|PDF|PATH|UTF-8|HEAD|Markdown|Windows|Unix|Mac|Word
         |Microsoft|Edge|Google|Chrome|Chromium|Diff|push|Push|upstream|stage|unstage|revert)\b
   | Eel-ditor
   | --word-diff | --cached

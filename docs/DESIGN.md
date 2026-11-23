@@ -367,6 +367,20 @@ diff-friendly mode.
 - Privacy: the page has a Content-Security-Policy allowing only local files (`img-src file: data:`), so remote
   images are not fetched; relative image paths resolve through `<base href>` to the document's folder.
 
+## 10b. Preview (HTML and Markdown)
+
+- View → HTML preview (Ctrl+Shift+V, as in VS Code) shows the current file rendered **on the right of the text**: an
+  HTML file as itself, a Markdown file through `MarkdownHtml` (the same HTML as the export). It follows typing after
+  300 ms and keeps its scroll position; its width and visibility are remembered. Trial since 2026-11-23.
+- **Drawn by Eel-ditor itself, not by a browser engine:** `HtmlParser` (Core, forgiving, implied end tags, entities)
+  builds a tree and `HtmlRenderer` turns it into Avalonia text blocks, lists, tables (colspan/rowspan), code blocks,
+  quotes and images. **Why:** principle 6 (no embedded browser, single light executable) and 7 (nothing runs, nothing
+  is fetched). Consequences: scripts, CSS (except `text-align`) and forms do not work; iframes, video and SVG are a
+  placeholder; images only from local files or `data:` URIs.
+- It is a separate read-only view beside the text, never a mode of the text (principle 3); text in it can be
+  selected and copied. A click on a link opens it (no caret to place, so no Ctrl), `#anchor` links scroll the
+  preview, other links go through the same rules as Ctrl+click in the editor. Documents over 3 MB are not previewed.
+
 ---
 
 ## 11. Performance and startup
@@ -404,7 +418,7 @@ diff-friendly mode.
 | WYSIWYG Markdown editor (rewrite from a model) | rejected | rewriting the file normalizes markup → diff noise; violates principle 1 |
 | Revealing markers around the caret (Typora/Obsidian style) | rejected | "mixed mode", same reason editable Cyrillic was withdrawn |
 | Editable Cyrillic view | withdrawn | the user did not accept the combined behaviour |
-| Read-only formatted preview (Markdig → Avalonia controls) | possible later | does not affect the source |
+| Read-only formatted preview (Markdig → Avalonia controls) | done differently | own HTML renderer, see §10b |
 | PDF preview (read-only) | possible later | not requested yet |
 | Markdig (or another Markdown library) for export | not used | the export must match the editor's parser; adding packages needs the user's approval |
 | Single `~x~` as strikethrough (GitHub) | rejected | `~x~` is subscript (Pandoc, markdown-it); strikethrough is `~~x~~` |

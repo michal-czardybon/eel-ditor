@@ -64,6 +64,7 @@ public partial class MainWindow : Window
         BuildToolbar();
         StartupTrace.Mark("  menus, toolbar");
         SetupSidebar();
+        SetupPreview();
         SetupEditorContextMenu();
         SetupConflicts();
         ApplyThemeToEditor();
@@ -365,6 +366,7 @@ public partial class MainWindow : Window
         _diffView?.ApplyPalette(p, tmTheme);
         if (_diffView is not null) _diffLinePanel?.Show(_diffView);
         _documentMap?.ApplyPalette(p);
+        SchedulePreview();
         _searchHighlighter?.SetBrush(p.SearchHighlight);
     }
 

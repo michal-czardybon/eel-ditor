@@ -23,6 +23,7 @@ The reasons behind these principles and the decisions made along the way are in 
 ## Other useful features
 
 - Export to HTML and PDF
+- Preview of HTML and Markdown beside the text, drawn by Eel-ditor itself (no browser engine)
 - Latin ↔ Cyrillic conversion (Russian, Ukrainian, Serbian, Interslavic, Polish)
 - Extended Markdown features (highlight, subscript, superscript, todo lists)
 

@@ -137,7 +137,9 @@
           </Border>
         </StackPanel>
 
-        <Panel Grid.Row="1" x:Name="EditorHost" Background="{DynamicResource EditorBrush}">
+        <!-- The text (or a comparison) and, on the right, the HTML / Markdown preview -->
+        <Grid Grid.Row="1" x:Name="EditorArea" ColumnDefinitions="*,0,0">
+        <Panel x:Name="EditorHost" Background="{DynamicResource EditorBrush}">
           <ae:TextEditor x:Name="Editor"
                          ShowLineNumbers="True"
                          HorizontalScrollBarVisibility="Auto"
@@ -147,6 +149,9 @@
           <TextBlock x:Name="LoadingText" IsVisible="False" HorizontalAlignment="Center" VerticalAlignment="Center"
                      Foreground="{DynamicResource DimTextBrush}" />
         </Panel>
+        <GridSplitter Grid.Column="1" x:Name="PreviewSplitter" IsVisible="False" Background="{DynamicResource BorderSubtleBrush}" ResizeDirection="Columns" />
+        <Border Grid.Column="2" x:Name="PreviewHost" Background="{DynamicResource EditorBrush}" ClipToBounds="True" />
+        </Grid>
 
         <GridSplitter Grid.Row="2" x:Name="ResultsSplitter" Height="4" IsVisible="False"
                       Background="{DynamicResource BorderSubtleBrush}" ResizeDirection="Rows" />
