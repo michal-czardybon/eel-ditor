@@ -82,6 +82,7 @@ public partial class MainWindow : Window
         });
         FilesTree.ContainerPrepared += OnTreeContainerPrepared;
         _files.GroupsRebuilt += (_, _) => SyncTreeSelection();
+        _files.GroupsRebuilt += (_, _) => Dispatcher.UIThread.Post(ForgetRemovedFocus, DispatcherPriority.Background);
         AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel);
         AddHandler(KeyUpEvent, OnWindowKeyUp, RoutingStrategies.Tunnel);
         // handledEventsToo: the editor's own text drag & drop sees the files first and may mark the event handled.
@@ -312,8 +313,15 @@ public partial class MainWindow : Window
         o.CutCopyWholeLine = true;
 
         var area = Editor.TextArea;
-        area.Caret.PositionChanged += (_, _) => { UpdateCaretStatus(); UpdateTableTools(); };
-        area.SelectionChanged += (_, _) => UpdateCaretStatus();
+        // Status and toolbar updates must never throw into AvaloniaEdit: its caret moves in the middle of operations
+        // (switching documents), and an exception there leaves the editor half updated.
+        void Safely(Action update)
+        {
+            try { update(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { ErrorLog.Write(ex); }
+        }
+        area.Caret.PositionChanged += (_, _) => Safely(() => { UpdateCaretStatus(); UpdateTableTools(); });
+        area.SelectionChanged += (_, _) => Safely(UpdateCaretStatus);
         area.TextEntered += (_, e) => { BreakLineAfterTyping(e.Text); UpdateLengthStatus(); };
 
         area.PropertyChanged += (_, e) =>
@@ -582,6 +590,29 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Avalonia's attached properties in which a control remembers an element that had the focus: a focus scope's last
+    /// focused element and a Tab-once container's (the sidebar's tabs) last active one.
+    /// </summary>
+    private static readonly AvaloniaProperty[] RememberedFocusProperties =
+        AvaloniaPropertyRegistry.Instance.GetRegisteredAttached(typeof(TabControl))
+            .Where(p => p.Name is "FocusedElement" or "TabOnceActiveElement" && typeof(IInputElement).IsAssignableFrom(p.PropertyType))
+            .ToArray();
+
+    /// <summary>
+    /// The sidebar remembers the element that last had the focus in it, also when it was the row of a file that is now
+    /// closed and gone from the tree: through the row's data the closed document — the whole text, 120 MB for a 30 MB
+    /// file — stayed in memory until something else in the sidebar got the focus (found with a heap dump). A remembered
+    /// element that is no longer in the window is forgotten.
+    /// </summary>
+    private void ForgetRemovedFocus()
+    {
+        foreach (var holder in new Control[] { SideTabs, FilesTree, FilesTab })
+            foreach (var property in RememberedFocusProperties)
+                if (holder.GetValue(property) is Visual v && Avalonia.VisualTree.VisualExtensions.GetVisualRoot(v) is null)
+                    holder.ClearValue(property);
+    }
+
     private void SyncTreeSelection()
     {
         _syncingTree = true;
@@ -715,7 +746,10 @@ public partial class MainWindow : Window
         var area = Editor.TextArea;
         var caret = area.Caret;
         int selChars = 0, selLines = 0;
-        if (!area.Selection.IsEmpty)
+        // While another document is being shown, AvaloniaEdit moves the caret before it clears the old selection: its
+        // offsets still belong to the old document. Reading them threw inside AvaloniaEdit's document switch, which was
+        // left half done (the old selection drawn over the new document failed every frame: the window stood still).
+        if (!area.Selection.IsEmpty && area.Selection.SurroundingSegment.EndOffset <= Editor.Document.TextLength)
         {
             selChars = area.Selection.Segments.Sum(s => s.Length);
             var seg = area.Selection.SurroundingSegment;

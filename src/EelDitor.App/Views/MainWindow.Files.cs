@@ -295,6 +295,20 @@ public partial class MainWindow
         if (ReferenceEquals(doc, _active)) Activate(next);
         _files.Remove(doc);
         if (_files.Documents.Count == 0) NewDocument();
+        if (doc.Document.TextLength > LargeDocumentChars) Dispatcher.UIThread.Post(GiveMemoryBack, DispatcherPriority.Background);
+    }
+
+    /// <summary>A document this long holds a few hundred megabytes (text, lines, display), worth giving back on close.</summary>
+    private const int LargeDocumentChars = 4_000_000;
+
+    /// <summary>
+    /// After a large document is closed: one full, compacting collection, so the memory goes back to the system at once
+    /// (otherwise the process kept its peak, e.g. 700 MB after closing a 30 MB file, until the runtime decided to collect).
+    /// </summary>
+    private static void GiveMemoryBack()
+    {
+        System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, blocking: true, compacting: true);
     }
 
     private async Task CloseManyAsync(IEnumerable<EditorDocument> docs)

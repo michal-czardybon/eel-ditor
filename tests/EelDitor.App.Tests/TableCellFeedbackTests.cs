@@ -316,6 +316,67 @@ public class TableCellFeedbackTests
     }
 
     [AvaloniaFact]
+    public void AClosedDocument_IsNotKeptInMemory_ByTheFocusedRowOfTheFileList()
+    {
+        // The sidebar remembered its last focused element, the closed file's row, and through it the whole document.
+        var (w, text) = OpenFocusAndClose();
+        for (int i = 0; i < 5; i++) { Settle(); GC.Collect(); GC.WaitForPendingFinalizers(); }
+        Assert.False(text.IsAlive);
+        GC.KeepAlive(w);
+    }
+
+    /// <summary>Opens a file, focuses its row in the file list, closes it; only a weak reference to its text is kept.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static (MainWindow W, WeakReference Text) OpenFocusAndClose()
+    {
+        var (w, doc) = Open("a\n", wrap: false, name: "a.txt");
+        w.NewDocument();
+        Settle();
+        var text = new WeakReference(doc.Document);
+        FocusRow(w, doc);
+        w.RunCommand("file.new");
+        w.Editor.TextArea.Focus();                        // the focus goes to the editor, as in the app
+        Settle();
+        CloseDocument(w, doc);
+        return (w, text);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void FocusRow(MainWindow w, EditorDocument doc)
+    {
+        w.FilesTree.GetVisualDescendants().OfType<TreeViewItem>().First(i => ReferenceEquals(i.DataContext, doc)).Focus();
+        Settle();
+    }
+
+    private static void CloseDocument(MainWindow w, EditorDocument doc)
+    {
+        var close = w.FilesTree.GetVisualDescendants().OfType<Button>()
+            .Single(x => x.Classes.Contains("rowClose") && ReferenceEquals(x.DataContext, doc));
+        close.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Settle();
+    }
+
+    [AvaloniaFact]
+    public void NewDocument_WithTextSelected_SwitchesCleanly()
+    {
+        // The status bar read the old selection's offsets while AvaloniaEdit was switching to the new, empty document;
+        // the exception left the switch half done and the window stood still.
+        var (w, doc) = Open(string.Concat(Enumerable.Repeat("Akapit z tekstem do zaznaczenia, dość długi.\r\n\r\n", 40)), wrap: true);
+        w.Editor.Select(200, 300);
+        Settle();
+        w.RunCommand("file.new");
+        Settle();
+        w.UpdateLayout();
+        var model = (OpenFilesModel)w.DataContext!;
+        Assert.Equal(2, model.Documents.Count);
+        Assert.NotSame(doc.Document, w.Editor.Document);
+        Assert.Equal(0, w.Editor.Document.TextLength);
+        Assert.True(w.Editor.TextArea.Selection.IsEmpty);
+        Assert.False(File.Exists(ErrorLog.FilePath) && File.ReadAllText(ErrorLog.FilePath).Contains("ArgumentOutOfRange"),
+            File.Exists(ErrorLog.FilePath) ? File.ReadAllText(ErrorLog.FilePath) : "");
+    }
+
+    [AvaloniaFact]
     public async Task PastingFromWord_KeepsListsAndStyles_AsMarkdown()
     {
         var (w, doc) = Open("Start\n", wrap: false);
