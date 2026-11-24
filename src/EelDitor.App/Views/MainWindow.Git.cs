@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using AvaloniaEdit.Document;
@@ -19,6 +21,7 @@ public partial class MainWindow
     /// <summary>Creates the sidebar tabs' content: the document map under the file tree and the git panel.</summary>
     private void SetupSidebar()
     {
+        SetupFileListModes();
         _documentMap = new DocumentMap(Editor);
         _documentMap.ApplyPalette(Palette);
         MapHost.Child = _documentMap;
@@ -35,6 +38,35 @@ public partial class MainWindow
         GitHost.Child = panel;
         // SelectionChanged bubbles: a click in a list inside a tab (e.g. the Git panel) must not count as a tab change.
         SideTabs.SelectionChanged += (_, e) => { if (ReferenceEquals(e.Source, SideTabs) && ReferenceEquals(SideTabs.SelectedItem, GitTab)) UpdateGitPanel(rescan: true); };
+    }
+
+    private readonly List<(ToggleButton Button, FileListMode Mode)> _fileListModeButtons = [];
+
+    /// <summary>The buttons of the list modes (Folders, Name, Date).</summary>
+    internal StackPanel FileListModes { get; } = new();
+
+    /// <summary>
+    /// The buttons above the open files, a mini toolbar like the Git tab's: grouped by folder, or one list by name or
+    /// by modification time.
+    /// </summary>
+    private void SetupFileListModes()
+    {
+        foreach (var (mode, label) in new[] { (FileListMode.Folders, "Panel.ByFolder"), (FileListMode.Name, "Panel.ByName"), (FileListMode.Modified, "Panel.ByDate") })
+        {
+            var b = new ToggleButton { Content = Loc.T(label), Focusable = false };
+            ToolTip.SetTip(b, Loc.T(label + "Tip"));
+            b.Click += (_, _) => SetFileListMode(mode);
+            _fileListModeButtons.Add((b, mode));
+        }
+        FileListModesHost.Child = ButtonBar.Strip(_fileListModeButtons.Select(x => (Button)x.Button).ToList(), FileListModes);
+        SetFileListMode(Enum.TryParse<FileListMode>(_settings.FileListMode, out var saved) ? saved : FileListMode.Folders);
+    }
+
+    internal void SetFileListMode(FileListMode mode)
+    {
+        _files.Mode = mode;
+        _settings.FileListMode = mode.ToString();
+        foreach (var (button, m) in _fileListModeButtons) button.IsChecked = m == mode;
     }
 
     /// <summary>Shows a sidebar tab (and the sidebar itself if it is hidden).</summary>

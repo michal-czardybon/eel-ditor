@@ -100,7 +100,7 @@ public class TableGridTests
         w.RunCommand("md.table.editCell");
         Assert.Equal("krótki", w.CellEditor!.Text);
         w.CellEditor.Text = "nowy | tekst";
-        Key(w, Avalonia.Input.Key.Enter);
+        Key(w, Avalonia.Input.Key.Enter, KeyModifiers.Control); // ends the edit (Enter is a new line)
         Assert.Null(w.CellEditor);
         Assert.Contains("| nowy \\| tekst | bardzo długi", doc.Document.Text);
         Assert.EndsWith("| x \\| y | z |\n", doc.Document.Text);
@@ -116,7 +116,7 @@ public class TableGridTests
         var visual = editor.TextArea.TextView.GetOrConstructVisualLine(editor.Document.GetLineByNumber(1));
         Assert.Contains(visual.Elements, e => e.GetType().Name == "HiddenElement");   // the backticks are not shown
         editor.Text = "lookup`";                          // the opening backtick deleted: it would pair with `find`
-        Key(w, Avalonia.Input.Key.Enter);
+        Key(w, Avalonia.Input.Key.Enter, KeyModifiers.Control); // ends the edit (Enter is a new line)
         Assert.Null(w.CellEditor);
         Assert.Contains("| lookup\\` | `find` |", doc.Document.Text);
         Assert.Contains("| `entry <id>` | the entry |", doc.Document.Text);
@@ -135,7 +135,7 @@ public class TableGridTests
         w.CellEditor!.Select(5, 3);
         Key(w, Avalonia.Input.Key.B, KeyModifiers.Control);
         Assert.Equal("find **all**", w.CellEditor!.Text);
-        Key(w, Avalonia.Input.Key.Enter);
+        Key(w, Avalonia.Input.Key.Enter, KeyModifiers.Control); // ends the edit (Enter is a new line)
         Assert.Contains("| find **all** | x |", doc.Document.Text);
     }
 
@@ -240,7 +240,7 @@ public class TableGridTests
     }
 
     [AvaloniaFact]
-    public void CellEditor_TabMovesToTheNextCell_EscCancels()
+    public void CellEditor_TabMovesToTheNextCell_EscKeepsTheEdit()
     {
         var (w, doc) = Open(wrap: true);
         w.EditTableCell(5, 1);
@@ -249,8 +249,10 @@ public class TableGridTests
         Dispatcher.UIThread.RunJobs();
         Assert.Equal("x \\| y", w.CellEditor!.Text);  // the backslash is hidden in the view
         w.CellEditor.Text = "zmiana";
-        Key(w, Avalonia.Input.Key.Escape);
+        Key(w, Avalonia.Input.Key.Escape);                  // ends the edit and keeps it, as a click elsewhere does
         Assert.Null(w.CellEditor);
+        Assert.Contains("| zmiana | z |", doc.Document.Text);
+        doc.Document.UndoStack.Undo();                        // Ctrl+Z puts the row back
         Assert.Equal(Table, doc.Document.Text);
 
         w.EditTableCell(6, 0);

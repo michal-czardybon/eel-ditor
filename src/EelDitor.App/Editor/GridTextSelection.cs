@@ -88,7 +88,10 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
     private void OnPressed(object? sender, PointerPressedEventArgs e)
     {
         if (e.Handled || !e.GetCurrentPoint(_view.Editor.TextArea).Properties.IsLeftButtonPressed) return;
-        if (e.ClickCount != 1 || (e.KeyModifiers & ~KeyModifiers.Shift) != KeyModifiers.None) return;
+        // Ctrl+click off a link is a plain click: AvaloniaEdit's own Ctrl+click selected the whole rows from the table's
+        // start to the clicked one. This handler runs before MarkdownView's, so a Ctrl+click on a link is left to it.
+        if (e.ClickCount != 1 || (e.KeyModifiers & ~(KeyModifiers.Shift | KeyModifiers.Control)) != KeyModifiers.None) return;
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && _view.HasLinkAt(e)) return; // the link opens (MarkdownView)
         if (HitTest(e) is not { } hit) { Clear(); return; }
         if ((e.KeyModifiers & KeyModifiers.Shift) != 0 && Anchor is { } anchor && ReferenceEquals(TableOf(anchor.Line), TableOf(hit.Line)))
             Select(anchor, hit);

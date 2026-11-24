@@ -454,13 +454,39 @@ public partial class MainWindow
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
     }
 
+    private SpecialCharacters? _specialCharacters;
+
+    /// <summary>The special-character window (one at a time; it stays open while characters are inserted).</summary>
+    private void ShowSpecialCharacters()
+    {
+        if (_specialCharacters is { } open) { open.Activate(); return; }
+        var window = _specialCharacters = new SpecialCharacters(InsertCharacter, _settings.RecentCharacters, Editor.FontFamily);
+        window.Closed += (_, _) => { _specialCharacters = null; Editor.Focus(); };
+        window.Show(this);
+    }
+
+    /// <summary>Puts a character at the caret (over the selection), into the cell being edited if there is one.</summary>
+    internal void InsertCharacter(string text)
+    {
+        var editor = CellEditor ?? Editor;
+        if (editor.IsReadOnly) return;
+        editor.TextArea.Selection.ReplaceSelectionWithText(text);
+        editor.TextArea.Caret.BringCaretToView();
+    }
+
     // ---------------------------------------------------------------- markdown
 
     private void ClearFormatting()
     {
         if (_markdown is null || Editor.IsReadOnly) return;
         (int cleared, int skipped) result;
-        using (KeepCellSelection()) result = MarkdownCommands.ClearFormatting(Editor, _markdown);
+        if (CellEditor is { } cellEditor && _cellView is { } cellView)
+        {
+            // A table cell being edited: its own text (from the menu or toolbar).
+            result = MarkdownCommands.ClearFormatting(cellEditor, cellView);
+            FocusEditor();
+        }
+        else using (KeepCellSelection()) result = MarkdownCommands.ClearFormatting(Editor, _markdown);
         var (cleared, skipped) = result;
         SetStatusMessage(skipped > 0 ? Loc.T("Md.ClearedSkipped", cleared, skipped) : Loc.T("Md.Cleared", cleared));
     }
@@ -478,7 +504,13 @@ public partial class MainWindow
     {
         if (_markdown is null) return;
         int failed;
-        using (KeepCellSelection()) failed = MarkdownCommands.ToggleStyle(Editor, _markdown, marker, style);
+        if (CellEditor is { } cellEditor && _cellView is { } cellView)
+        {
+            // A table cell being edited: the style goes to the selected text there, not to the whole cell.
+            failed = MarkdownCommands.ToggleStyle(cellEditor, cellView, marker, style);
+            FocusEditor();
+        }
+        else using (KeepCellSelection()) failed = MarkdownCommands.ToggleStyle(Editor, _markdown, marker, style);
         if (failed > 0) SetStatusMessage(Loc.T("Md.StyleSkipped", failed));
     }
 
@@ -620,6 +652,7 @@ public partial class MainWindow
         await dlg.ShowDialog(this);
         if (!dlg.Saved) return;
         Editor.FontFamily = new FontFamily(_settings.FontFamily);
+        SymbolWidths.Use(Editor.FontFamily);
         Editor.FontSize = _settings.FontSize;
         SetIndentation(_settings.UseSpaces, _settings.TabSize);
         App.ApplyTheme(_settings.Theme);

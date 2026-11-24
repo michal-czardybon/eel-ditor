@@ -163,18 +163,21 @@ public class TableGridExtrasTests
         w.EditTableCell(3, 0);
         Assert.Equal("jeden\ndwa\ntrzy", w.CellEditor!.Text);
         // Unchanged: the tags stay as written.
-        CellKey(w, Key.Enter);
+        CellKey(w, Key.Enter, KeyModifiers.Control);
         Assert.Contains("| jeden<br>dwa <br/> trzy | x |", doc.Document.Text);
 
         w.EditTableCell(3, 0);
         w.CellEditor!.TextArea.ClearSelection();
         w.CellEditor.CaretOffset = w.CellEditor.Text.Length;
-        CellKey(w, Key.Enter, KeyModifiers.Shift);         // a new line, not saving
+        CellKey(w, Key.Enter);                             // a new line, not the end of the edit
         Assert.NotNull(w.CellEditor);
         w.CellEditor.Document.Insert(w.CellEditor.CaretOffset, "cztery");
-        CellKey(w, Key.Enter);
+        CellKey(w, Key.Enter, KeyModifiers.Shift);         // Shift+Enter too
+        Assert.NotNull(w.CellEditor);
+        w.CellEditor.Document.Insert(w.CellEditor.CaretOffset, "pięć");
+        CellKey(w, Key.Enter, KeyModifiers.Control);
         Assert.Null(w.CellEditor);
-        Assert.Contains("| jeden<br>dwa<br>trzy<br>cztery | x |", doc.Document.Text);
+        Assert.Contains("| jeden<br>dwa<br>trzy<br>cztery<br>pięć | x |", doc.Document.Text);
     }
 
     [AvaloniaFact]

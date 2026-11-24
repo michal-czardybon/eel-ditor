@@ -1,5 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using AvaloniaEdit;
 
@@ -24,5 +26,36 @@ public static class EditorScroll
     {
         if (Viewer(editor) is { } v) v.Offset = new Vector(Math.Max(0, x), v.Offset.Y);
         else editor.ScrollToHorizontalOffset(x);
+    }
+
+    /// <summary>
+    /// Keeps the view on the text: when the text gets shorter (a wider window makes table rows and paragraphs wrap
+    /// less), the editor's ScrollViewer moves its own offset back to the end, but the text view keeps the old one and
+    /// shows empty space past the last line — up to a whole screen — until the user scrolls. Setting the ScrollViewer
+    /// does nothing then (it already has that offset), so the text view's offset is set directly.
+    /// </summary>
+    public static void KeepOnText(TextEditor editor)
+    {
+        var tv = editor.TextArea.TextView;
+        bool posted = false;
+        void Check()
+        {
+            posted = false;
+            if (tv.Bounds.Height <= 0 || !tv.VisualLinesValid) return;
+            double last = Math.Max(0, tv.DocumentHeight - tv.Bounds.Height);
+            if (tv.VerticalOffset <= last + 1) return;
+            var scrollable = (ILogicalScrollable)tv;
+            scrollable.Offset = new Vector(scrollable.Offset.X, last);
+            if (Viewer(editor) is { } v && Math.Abs(v.Offset.Y - last) > 0.5) v.Offset = new Vector(v.Offset.X, last);
+        }
+        void Post(object? sender, EventArgs e)
+        {
+            if (posted) return;
+            posted = true;
+            Dispatcher.UIThread.Post(Check, DispatcherPriority.Background);
+        }
+        tv.VisualLinesChanged += Post;
+        tv.LayoutUpdated += Post;
+        tv.ScrollOffsetChanged += Post;
     }
 }

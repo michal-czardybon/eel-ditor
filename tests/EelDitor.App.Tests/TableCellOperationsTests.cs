@@ -360,7 +360,7 @@ public class TableCellOperationsTests
         editor.Document.Insert(editor.Document.TextLength, " razy");
         Settle();
         Assert.Equal("| jeden | dwa i pół razy |", Line(doc, 3));
-        CellKey(w, Key.Enter);
+        CellKey(w, Key.Enter, KeyModifiers.Control);
         Assert.Null(w.CellEditor);
         doc.Document.UndoStack.Undo();                                  // the whole edit at once
         Assert.Equal("| jeden | dwa |", Line(doc, 3));
@@ -386,7 +386,7 @@ public class TableCellOperationsTests
     }
 
     [AvaloniaFact]
-    public void InAGrid_EscPutsTheRowBack()
+    public void InAGrid_EscKeepsTheEdit_AndCtrlZPutsTheRowBack()
     {
         var (w, doc) = Open("| a | b |\n|---|---|\n| jeden | dwa<br/>trzy |\n", wrap: true);
         w.EditTableCell(3, 1);
@@ -395,6 +395,9 @@ public class TableCellOperationsTests
         Settle();
         Assert.Equal("| jeden | zero dwa<br>trzy |", Line(doc, 3));
         CellKey(w, Key.Escape);
+        Assert.Null(w.CellEditor);
+        Assert.Equal("| jeden | zero dwa<br>trzy |", Line(doc, 3));
+        doc.Document.UndoStack.Undo();                                  // the whole edit at once
         Assert.Equal("| jeden | dwa<br/>trzy |", Line(doc, 3));       // exactly as it was, <br/> too
         Assert.False(doc.Document.UndoStack.CanUndo);
     }

@@ -53,7 +53,11 @@ public sealed class AppSettings
     public bool WindowMaximized { get; set; }
 
     public bool SortGroupsByName { get; set; } = true;
+    /// <summary>The open-files panel: "Folders" (grouped), "Name" or "Modified" (flat lists).</summary>
+    public string FileListMode { get; set; } = "Folders";
     public List<string> RecentFiles { get; set; } = [];
+    /// <summary>Characters inserted from the special-character window, newest first.</summary>
+    public List<string> RecentCharacters { get; set; } = [];
     public List<string> FindHistory { get; set; } = [];
     public List<string> ReplaceHistory { get; set; } = [];
     public string FindInFilesDirectory { get; set; } = "";

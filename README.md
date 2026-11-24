@@ -26,6 +26,8 @@ The reasons behind these principles and the decisions made along the way are in 
 - Preview of HTML and Markdown beside the text, drawn by Eel-ditor itself (no browser engine)
 - Latin ↔ Cyrillic conversion (Russian, Ukrainian, Serbian, Interslavic, Polish)
 - Extended Markdown features (highlight, subscript, superscript, todo lists)
+- Pasting from Word keeps lists, tables, headings and styles as Markdown
+- Any Unicode character from a window of categories (Edit → Insert special character)
 
 ## Line-break conventions
 

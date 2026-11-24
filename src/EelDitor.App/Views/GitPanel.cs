@@ -66,15 +66,19 @@ public sealed class GitPanel : DockPanel
         ToolTip.SetTip(_commit, "Ctrl+Enter");
         _commit.Click += (_, _) => RequestCommit();
         _push.Click += (_, _) => PushRequested?.Invoke();
-        foreach (var b in new[] { rescan, _commit, _push }) { b.FontSize = 12; b.Padding = new Thickness(10, 3); }
 
-        var top = new StackPanel { Margin = new Thickness(8, 8, 8, 4), Spacing = 4 };
+        // The repository, then the actions as a mini toolbar across the panel, then the commit message.
+        var top = new StackPanel { Margin = new Thickness(8, 8, 8, 6), Spacing = 4 };
         top.Children.Add(_repo);
         top.Children.Add(_branch);
-        top.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { rescan, _commit, _push } });
-        top.Children.Add(_message);
         SetDock(top, Dock.Top);
         Children.Add(top);
+        var actions = ButtonBar.Strip([rescan, _commit, _push]);
+        SetDock(actions, Dock.Top);
+        Children.Add(actions);
+        _message.Margin = new Thickness(8, 6, 8, 4);
+        SetDock(_message, Dock.Top);
+        Children.Add(_message);
         SetDock(_info, Dock.Bottom);
         Children.Add(_info);
 

@@ -68,13 +68,18 @@ public partial class MainWindow
     private int HeadingLevelAtCaret =>
         _markdown?.RenderFor(Editor.Document.GetLineByOffset(Math.Min(Editor.CaretOffset, Editor.Document.TextLength))) is { Kind: MdLineKind.Heading } r ? r.HeadingLevel : 0;
 
+    /// <summary>Commands that apply to the cell editor's text while a table cell is edited (from the menu or toolbar).</summary>
+    private static readonly HashSet<string> CellEditorCommands =
+        ["md.bold", "md.italic", "md.strike", "md.code", "md.highlight", "md.sub", "md.sup", "md.clearFormat"];
+
     private void Add(string id, string labelKey, Action execute, string[]? gestures = null, Func<bool>? canExecute = null, Func<bool>? isChecked = null, string? tooltipKey = null)
     {
         var cmd = new AppCommand
         {
             Id = id,
             LabelKey = labelKey,
-            Execute = execute,
+            // Only the style commands act on a cell being edited; any other command ends that edit first.
+            Execute = CellEditorCommands.Contains(id) ? execute : () => { CloseCellEditor(); execute(); },
             Gestures = gestures ?? [],
             CanExecute = canExecute,
             IsChecked = isChecked,
@@ -215,7 +220,9 @@ public partial class MainWindow
         Add("edit.cut", "Menu.Edit.Cut", () => _ = CutAsync(), ["Ctrl+X", "Shift+Delete"]);
         Add("edit.copy", "Menu.Edit.Copy", () => _ = CopyAsync(), ["Ctrl+C", "Ctrl+Insert"]);
         Add("edit.paste", "Menu.Edit.Paste", () => _ = PasteAsync(), ["Ctrl+V", "Shift+Insert"]);
+        Add("edit.pastePlain", "Menu.Edit.PastePlain", () => _ = PasteTextAsync(), null, () => !Editor.IsReadOnly, tooltipKey: "Menu.Edit.PastePlainTip");
         Add("edit.selectAll", "Menu.Edit.SelectAll", () => Editor.SelectAll(), ["Ctrl+A"]);
+        Add("edit.specialChar", "Menu.Edit.SpecialChar", ShowSpecialCharacters, null, () => !Editor.IsReadOnly && _diffView is null, tooltipKey: "Menu.Edit.SpecialCharTip");
         Add("edit.duplicate", "Menu.Edit.Duplicate", DuplicateLines, ["Ctrl+D"]);
         Add("edit.deleteLine", "Menu.Edit.DeleteLine", DeleteLines, ["Ctrl+Shift+L", "Ctrl+L"]);
         Add("edit.moveUp", "Menu.Edit.MoveLineUp", () => MoveLines(-1), ["Alt+Up", "Ctrl+Shift+Up"]);
@@ -416,7 +423,8 @@ public partial class MainWindow
 
         MainMenu.Items.Add(Sub("Menu.Edit",
             Item("edit.undo"), Item("edit.redo"), Sep(),
-            Item("edit.cut"), Item("edit.copy"), Item("edit.paste"), Item("edit.selectAll"), Sep(),
+            Item("edit.cut"), Item("edit.copy"), Item("edit.paste"), Item("edit.pastePlain"), Item("edit.selectAll"), Sep(),
+            Item("edit.specialChar"), Sep(),
             Sub("Menu.Edit.Lines", Item("edit.duplicate"), Item("edit.deleteLine"), Item("edit.moveUp"), Item("edit.moveDown"), Item("edit.trimTrailing")),
             Sub("Menu.Edit.Comments", Item("edit.comment"), Item("edit.commentAdd"), Item("edit.commentRemove")),
             Sub("Menu.Edit.Case", Item("edit.upper"), Item("edit.lower")),
@@ -588,7 +596,7 @@ public partial class MainWindow
             var cmd = _commands[id];
             var b = new Button { Classes = { "tool" }, Content = Icon(icon, brush) };
             ToolTip.SetTip(b, Tip(cmd));
-            b.Click += (_, _) => { if (cmd.CanExecute?.Invoke() ?? true) cmd.Execute(); Editor.Focus(); RefreshCommandStates(); };
+            b.Click += (_, _) => { if (cmd.CanExecute?.Invoke() ?? true) cmd.Execute(); FocusEditor(); RefreshCommandStates(); };
             if (cmd.CanExecute is not null) _toolButtons.Add((b, cmd));
             Toolbar.Children.Add(b);
         }
@@ -598,7 +606,7 @@ public partial class MainWindow
             var b = new ToggleButton { Classes = { "tool" }, Content = Icon(icon, brush) };
             ToolTip.SetTip(b, Tip(cmd));
             b.IsChecked = cmd.IsChecked!();
-            b.Click += (_, _) => { cmd.Execute(); Editor.Focus(); RefreshCommandStates(); };
+            b.Click += (_, _) => { cmd.Execute(); FocusEditor(); RefreshCommandStates(); };
             _toggleButtons.Add((b, cmd));
             Toolbar.Children.Add(b);
         }
@@ -622,8 +630,8 @@ public partial class MainWindow
         Btn("search.replace", "IconReplace", "IconTealBrush");
         S();
         Toggle("view.wrap", "IconWrap");
-        Toggle("view.allChars", "IconWhitespace");
         Toggle("md.raw", "IconMarkdown", "IconBlueBrush");
+        Toggle("view.allChars", "IconWhitespace");
         BuildParagraphTools(S);
         S();
         Btn("diff.head", "IconDiff", "IconGreenBrush");

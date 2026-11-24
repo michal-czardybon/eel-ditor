@@ -67,6 +67,7 @@ public partial class MainWindow : Window
         SetupPreview();
         SetupEditorContextMenu();
         SetupConflicts();
+        SetupCellEditorDismiss();
         ApplyThemeToEditor();
 
         FilesTree.SelectionChanged += OnTreeSelectionChanged;
@@ -287,7 +288,11 @@ public partial class MainWindow : Window
     private void ConfigureEditor()
     {
         Editor.Document = _emptyDocument;
+        EditorScroll.KeepOnText(Editor);
+        SymbolWeight.Install(Editor.TextArea.TextView);
         Editor.FontFamily = new FontFamily(_settings.FontFamily);
+        SymbolWidths.Use(Editor.FontFamily);
+        SymbolText.WarmUp(Editor.FontFamily);
         Editor.FontSize = _settings.FontSize;
         Editor.ShowLineNumbers = _settings.ShowLineNumbers;
         Editor.WordWrap = _settings.WordWrap;

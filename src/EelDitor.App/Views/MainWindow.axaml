@@ -55,11 +55,13 @@
       <!-- Sidebar: open files (grouped by directory) with the document map, and the git changes tab -->
       <TabControl x:Name="SideTabs" Classes="side" Background="{DynamicResource PanelBrush}" Padding="0">
         <TabItem Header="{loc:T Side.Files}" x:Name="FilesTab">
-          <Grid x:Name="FilesTabGrid" RowDefinitions="Auto,*">
-            <Border Padding="6,6,6,4">
+          <Grid x:Name="FilesTabGrid" RowDefinitions="Auto,Auto,*">
+            <Border Padding="6,6,6,6">
               <TextBox x:Name="FilterBox" Watermark="{loc:T Panel.Filter}" Text="{Binding Filter}" FontSize="12" />
             </Border>
-            <TreeView Grid.Row="1" x:Name="FilesTree" ItemsSource="{Binding Groups}" Background="Transparent"
+            <!-- How the files are listed (grouped by folder, or one list by name or by date): a mini toolbar. -->
+            <Border Grid.Row="1" x:Name="FileListModesHost" />
+            <TreeView Grid.Row="2" x:Name="FilesTree" ItemsSource="{Binding TopItems}" Background="Transparent"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled">
               <TreeView.DataTemplates>
                 <TreeDataTemplate DataType="doc:FileGroup" ItemsSource="{Binding Items}">

@@ -51,6 +51,17 @@ public sealed partial class FileGroup : ObservableObject
     public string Tooltip => string.IsNullOrEmpty(Directory) ? Display : Directory;
 }
 
+/// <summary>How the open-files panel lists the files.</summary>
+public enum FileListMode
+{
+    /// <summary>Grouped by directory (nested directories nested).</summary>
+    Folders,
+    /// <summary>One flat list, by file name.</summary>
+    Name,
+    /// <summary>One flat list, the most recently modified (on disk) first.</summary>
+    Modified,
+}
+
 /// <summary>
 /// The list of open documents grouped by directory, with filtering and most-recently-used order.
 /// Replaces tabs: scales to many files because groups collapse and the filter narrows instantly.
@@ -63,7 +74,28 @@ public sealed partial class OpenFilesModel : ObservableObject
 
     public IReadOnlyList<EditorDocument> Documents => _documents;
 
+    /// <summary>The directory groups (empty in a flat list).</summary>
     public ObservableCollection<FileGroup> Groups { get; } = [];
+
+    /// <summary>What the panel's tree shows at the top: the groups, or the documents of a flat list.</summary>
+    public ObservableCollection<object> TopItems { get; } = [];
+
+    private readonly List<EditorDocument> _flat = [];
+
+    /// <summary>Grouped by folder, or a flat list by name or by modification time.</summary>
+    public FileListMode Mode
+    {
+        get => _mode;
+        set
+        {
+            if (_mode == value) return;
+            _mode = value;
+            Rebuild();
+            OnPropertyChanged();
+        }
+    }
+
+    private FileListMode _mode;
 
     [ObservableProperty]
     private string _filter = "";
@@ -113,7 +145,7 @@ public sealed partial class OpenFilesModel : ObservableObject
         _documents.OrderByDescending(d => d.LastActivated).ToList();
 
     /// <summary>Documents in the order they appear in the panel.</summary>
-    public IEnumerable<EditorDocument> VisualOrder() => AllGroups().SelectMany(g => g.Files);
+    public IEnumerable<EditorDocument> VisualOrder() => Mode == FileListMode.Folders ? AllGroups().SelectMany(g => g.Files) : _flat;
 
     /// <summary>Every group, nested ones included, in tree order.</summary>
     public IEnumerable<FileGroup> AllGroups() => Groups.SelectMany(g => g.SelfAndDescendants);
@@ -131,6 +163,23 @@ public sealed partial class OpenFilesModel : ObservableObject
         var filtered = string.IsNullOrWhiteSpace(Filter)
             ? _documents
             : _documents.Where(d => FuzzyMatch(Filter, d)).ToList();
+
+        _flat.Clear();
+        if (Mode != FileListMode.Folders)
+        {
+            // Pinned files first, as in the groups; files without a name (new) after the others.
+            var ordered = filtered.OrderByDescending(d => d.Pinned);
+            ordered = Mode == FileListMode.Name
+                ? ordered.ThenBy(d => d.FileName, StringComparer.OrdinalIgnoreCase).ThenBy(d => d.DirectoryPath, StringComparer.OrdinalIgnoreCase)
+                : ordered.ThenByDescending(d => d.FilePath is null ? DateTime.MinValue : d.LastWriteTimeUtc)
+                    .ThenBy(d => d.FileName, StringComparer.OrdinalIgnoreCase);
+            _flat.AddRange(ordered);
+            Groups.Clear();
+            TopItems.Clear();
+            foreach (var d in _flat) TopItems.Add(d);
+            GroupsRebuilt?.Invoke(this, EventArgs.Empty);
+            return;
+        }
 
         var grouped = filtered
             .GroupBy(d => d.DirectoryPath, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
@@ -162,7 +211,8 @@ public sealed partial class OpenFilesModel : ObservableObject
             foreach (var f in group.Files) group.Items.Add(f);
         }
         Groups.Clear();
-        foreach (var group in all.Where(g => g.Parent is null)) Groups.Add(group);
+        TopItems.Clear();
+        foreach (var group in all.Where(g => g.Parent is null)) { Groups.Add(group); TopItems.Add(group); }
         GroupsRebuilt?.Invoke(this, EventArgs.Empty);
     }
 

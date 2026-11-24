@@ -481,11 +481,49 @@ public sealed class MarkdownView : IDisposable
     /// <summary>The styled range under the pointer (links, footnotes, images), with its line.</summary>
     private (DocumentLine Line, StyledRange Range)? RangeAt(PointerEventArgs e)
     {
+        if (GridRowAt(e) is { } grid) return GridRangeAt(e, grid.Visual, grid.Element);
         if (_editor.GetPositionFromPoint(e.GetPosition(_editor)) is not { } pos) return null;
         var line = _document.GetLineByNumber(pos.Line);
         int col = _document.GetOffset(pos.Location) - line.Offset;
         foreach (var s in RenderFor(line).Styles)
             if (s.Url is not null && col >= s.Start && col <= s.End && (s.Style & (MdStyle.Link | MdStyle.Footnote | MdStyle.Image)) != 0)
+                return (line, s);
+        return null;
+    }
+
+    /// <summary>Whether a link (footnote, image) is under the pointer.</summary>
+    internal bool HasLinkAt(PointerEventArgs e) => RangeAt(e) is not null;
+
+    /// <summary>The grid row under the pointer (tables drawn as grids), or null.</summary>
+    private (VisualLine Visual, TableRowElement Element)? GridRowAt(PointerEventArgs e)
+    {
+        if (!TablesAsGrid) return null;
+        var tv = _editor.TextArea.TextView;
+        if (!tv.VisualLinesValid) return null;
+        var p = e.GetPosition(tv) + tv.ScrollOffset;
+        var visual = tv.GetVisualLineFromVisualTop(p.Y);
+        return visual is { Elements.Count: 1 } && visual.Elements[0] is TableRowElement el ? (visual, el) : null;
+    }
+
+    /// <summary>
+    /// The link (footnote, image) under the pointer in a grid row: the character under it, mapped back to the source
+    /// through the hidden markup. A grid row is one element, so the editor's own hit-testing gives only its start.
+    /// </summary>
+    private (DocumentLine Line, StyledRange Range)? GridRangeAt(PointerEventArgs e, VisualLine visual, TableRowElement el)
+    {
+        var tv = _editor.TextArea.TextView;
+        var p = e.GetPosition(tv) + tv.ScrollOffset;
+        double x0 = visual.GetVisualPosition(0, VisualYPosition.LineTop).X;
+        int drawn = (int)Math.Floor((p.Y - visual.VisualTop) / Math.Max(1, tv.DefaultLineHeight));
+        if (el.CharAt((p.X - x0) / Math.Max(1, tv.WideSpaceWidth), drawn) is not { } hit) return null;
+        var line = visual.FirstDocumentLine;
+        if (Model.TableAtLine(line.LineNumber - 1)?.RowAtLine(line.LineNumber - 1) is not { } row || hit.Cell >= row.Cells.Count) return null;
+        var render = RenderFor(line);
+        var map = TableWrap.ShownToSource(_document.GetText(line), row.Cells[hit.Cell], render);
+        if (hit.Index >= map.Count) return null;
+        int col = map[hit.Index];
+        foreach (var s in render.Styles)
+            if (s.Url is not null && col >= s.Start && col < s.End && (s.Style & (MdStyle.Link | MdStyle.Footnote | MdStyle.Image)) != 0)
                 return (line, s);
         return null;
     }
@@ -894,6 +932,17 @@ internal sealed class MarkdownColorizer(MarkdownView view, EditorPalette palette
             });
         }
 
+        // Symbols and emoji in bold text stay at normal weight (see SymbolText: bold made them white, for good).
+        string lineText = CurrentContext.Document.GetText(line);
+        if (SymbolText.HasSymbol(lineText))
+            foreach (var (start, length, symbols) in SymbolText.Runs(lineText))
+                if (symbols)
+                    Change(o + start, o + start + length, el =>
+                    {
+                        var tf = el.TextRunProperties.Typeface;
+                        if (tf.Weight != FontWeight.Normal) el.TextRunProperties.SetTypeface(new Typeface(tf.FontFamily, tf.Style, FontWeight.Normal, tf.Stretch));
+                    });
+
         // Headings: the level shows in the size (the font stays monospace; headings are not aligned with anything).
         if (render.Kind == MdLineKind.Heading && HeadingScale(render.HeadingLevel) is var scale and > 1)
             Change(o, o + line.Length, el => el.TextRunProperties.SetFontRenderingEmSize(el.TextRunProperties.FontRenderingEmSize * scale));
@@ -1120,8 +1169,8 @@ internal sealed class TableGridGenerator(MarkdownView view) : VisualLineElementG
         }
         if (!_layouts.TryGetValue(table.FirstLine, out var layout))
         {
-            var natural = TableWrap.NaturalWidths(table, view.Source, view.Model.GetLine);
-            _layouts[table.FirstLine] = layout = new TableGridLayout(TableWrap.ColumnWidths(natural, available), available);
+            var columns = TableWrap.ColumnTexts(table, view.Source, view.Model.GetLine);
+            _layouts[table.FirstLine] = layout = new TableGridLayout(TableWrap.ColumnWidths(columns, available), available);
         }
         return layout;
     }
@@ -1240,6 +1289,31 @@ internal sealed class TableRowElement(int documentLength, TableGridLayout layout
         return (cell, start + k);
     }
 
+    /// <summary>
+    /// The character drawn at a point (character columns and drawn line from the element's top left): its cell and
+    /// index in the cell's shown text; null between characters, on borders and on the separator row.
+    /// </summary>
+    public (int Cell, int Index)? CharAt(double column, int drawnLine)
+    {
+        if (kind == MdLineKind.TableSeparator || cells.Count == 0) return null;
+        var widths = Layout.Widths;
+        int cell = 0;
+        while (cell + 1 < widths.Length && column >= TableWrap.BorderAt(widths, cell + 1)) cell++;
+        if (cell >= cells.Count) return null;
+        var g = cells[cell];
+        int line = drawnLine - TopLines;
+        if (line < 0 || line >= g.Ranges.Count) return null;
+        var (start, length) = g.Ranges[line];
+        double x = ColumnOf(cell, line);
+        for (int k = 0; k < length; k++)
+        {
+            int w = TextWidth.Of(g.Text.AsSpan(start + k, 1));
+            if (column >= x && column < x + w) return (cell, start + k);
+            x += w;
+        }
+        return null;
+    }
+
     /// <summary>Rectangles (in character columns and drawn lines) covering characters [from, to) of a cell's text.</summary>
     public IEnumerable<(int Column, int Line, int Width)> Spans(int cell, int from, int to)
     {
@@ -1325,18 +1399,67 @@ internal sealed class TableRowRun(TextRunProperties properties, double charWidth
     /// The shaped text, built on the first draw and kept: a row is repainted many times (scrolling, the caret, the
     /// height primer moving the view) but its text changes only when the row is built again.
     /// </summary>
-    private (List<(IBrush Brush, Rect Rect)> Fills, List<(FormattedText Text, Point At)> Texts)? _shaped;
+    private (List<(IBrush Brush, Rect Rect)> Fills, List<(FormattedText Text, Point At, double Scale)> Texts)? _shaped;
 
     public override void Draw(DrawingContext context, Point origin)
     {
         var (fills, texts) = _shaped ??= Build();
         var offset = new Vector(origin.X, origin.Y);
         foreach (var (brush, rect) in fills) context.FillRectangle(brush, rect.Translate(offset));
-        foreach (var (text, at) in texts) context.DrawText(text, at + offset);
+        foreach (var (text, at, scale) in texts)
+        {
+            if (scale == 1) { context.DrawText(text, at + offset); continue; }
+            var p = at + offset;
+            using (context.PushTransform(Matrix.CreateScale(scale, scale) * Matrix.CreateTranslation(p.X, p.Y)))
+                context.DrawText(text, default);
+        }
+    }
+
+    /// <summary>The advance of a piece of text in a face, measured once per piece, face and size.</summary>
+    private static readonly Dictionary<(string Text, Typeface Face, double Size), double> Advances = [];
+
+    private static double Advance(string text, Typeface face, double size)
+    {
+        if (Advances.TryGetValue((text, face, size), out double width)) return width;
+        if (Advances.Count > 20_000) Advances.Clear();
+        width = new FormattedText(text, System.Globalization.CultureInfo.InvariantCulture, FlowDirection.LeftToRight, face, size, null)
+            .WidthIncludingTrailingWhitespace;
+        return Advances[(text, face, size)] = width;
+    }
+
+    /// <summary>
+    /// A run of one style, cut where a character is drawn wider or narrower than the columns it is counted for (an
+    /// emoji or a symbol from a fallback font, a non-breaking hyphen): drawn as one piece, such a character pushed the
+    /// rest of the run into the next characters or over the cell's border. Each piece: its text, its first column
+    /// (relative to the run) and whether it fits its columns.
+    /// </summary>
+    private static IEnumerable<(string Text, int Column, int Columns, bool Fits)> Pieces(string run, Typeface face, double size, double charWidth)
+    {
+        int start = 0, column = 0, pieceColumn = 0;
+        var e = System.Globalization.StringInfo.GetTextElementEnumerator(run);
+        while (e.MoveNext())
+        {
+            string element = e.GetTextElement();
+            int at = e.ElementIndex, columns = TextWidth.Of(element);
+            // Symbols are measured (and drawn) at normal weight: never bold, see SymbolText.
+            var measureFace = face.Weight != FontWeight.Normal && SymbolText.HasSymbol(element)
+                ? new Typeface(face.FontFamily, face.Style, FontWeight.Normal, face.Stretch) : face;
+            bool fits = element.Length == 1 && element[0] is >= ' ' and < '\u007f'
+                || columns > 0 && Math.Abs(Advance(element, measureFace, size) - columns * charWidth) <= 0.5;
+            if (!fits)
+            {
+                if (at > start) yield return (run[start..at], pieceColumn, column - pieceColumn, true);
+                yield return (element, column, columns, false);
+                start = at + element.Length;
+                pieceColumn = column + columns;
+            }
+            column += columns;
+        }
+        if (start < run.Length) yield return (run[start..], pieceColumn, column - pieceColumn, true);
     }
 
     /// <summary>Shapes the row once: the frame lines and every styled run, at positions relative to the run's origin.</summary>
-    private (List<(IBrush Brush, Rect Rect)> Fills, List<(FormattedText Text, Point At)> Texts) Build()
+    private (List<(IBrush Brush, Rect Rect)> Fills, List<(FormattedText Text, Point At, double Scale)> Texts) Build()
     {
         var tf = Properties.Typeface;
         double size = Properties.FontRenderingEmSize;
@@ -1344,7 +1467,7 @@ internal sealed class TableRowRun(TextRunProperties properties, double charWidth
         // Not the run's brush: the Markdown colorizer dims the pipes, which are part of this element.
         var textBrush = kind == MdLineKind.TableHeader ? palette.Accent : palette.Foreground;
         var fills = new List<(IBrush, Rect)>();
-        var texts = new List<(FormattedText, Point)>();
+        var texts = new List<(FormattedText, Point, double)>();
         var faces = new Dictionary<(FontStyle, FontWeight), Typeface>();
         Typeface Face(FontStyle style, FontWeight weight) =>
             faces.TryGetValue((style, weight), out var f) ? f : faces[(style, weight)] = new Typeface(tf.FontFamily, style, weight, tf.Stretch);
@@ -1354,7 +1477,7 @@ internal sealed class TableRowRun(TextRunProperties properties, double charWidth
             double y = i * lineHeight;
             var frame = new FormattedText(line.Text, culture, FlowDirection.LeftToRight, tf, size, palette.Dim);
             double dy = (lineHeight - frame.Height) / 2;
-            texts.Add((frame, new Point(0, y + dy)));
+            texts.Add((frame, new Point(0, y + dy), 1));
             if (line.Cells is null) continue;
             foreach (var (column, text) in line.Cells)
             {
@@ -1379,11 +1502,33 @@ internal sealed class TableRowRun(TextRunProperties properties, double charWidth
                     if (style.HasFlag(MdStyle.Highlight)) fills.Add((palette.Highlight, rect));
                     // Sub- and superscripts: smaller and shifted, but in their own cells, so the grid stays aligned.
                     bool sub = style.HasFlag(MdStyle.Subscript), sup = style.HasFlag(MdStyle.Superscript);
-                    var ft = new FormattedText(run, culture, FlowDirection.LeftToRight, face, sub || sup ? size * 0.75 : size, brush);
-                    if (style.HasFlag(MdStyle.Strike)) ft.SetTextDecorations(TextDecorations.Strikethrough);
-                    else if (style.HasFlag(MdStyle.Link)) ft.SetTextDecorations(TextDecorations.Underline);
                     double shift = sup ? -lineHeight * 0.12 : sub ? lineHeight * 0.22 : 0;
-                    texts.Add((ft, new Point(rect.X, y + dy + shift)));
+                    FormattedText Shape(string s, double em)
+                    {
+                        // Symbols and emoji never bold (see SymbolText).
+                        var pieceFace = face.Weight != FontWeight.Normal && SymbolText.HasSymbol(s) ? Face(face.Style, FontWeight.Normal) : face;
+                        var ft = new FormattedText(s, culture, FlowDirection.LeftToRight, pieceFace, em, brush);
+                        if (style.HasFlag(MdStyle.Strike)) ft.SetTextDecorations(TextDecorations.Strikethrough);
+                        else if (style.HasFlag(MdStyle.Link)) ft.SetTextDecorations(TextDecorations.Underline);
+                        return ft;
+                    }
+                    if (sub || sup) texts.Add((Shape(run, size * 0.75), new Point(rect.X, y + dy + shift), 1));
+                    else
+                        // Every character on its own columns: one drawn wider than counted is made smaller to fit them,
+                        // one drawn narrower is centred on them.
+                        foreach (var (piece, column0, columns, fits) in Pieces(run, face, size, charWidth))
+                        {
+                            var ft = Shape(piece, size);
+                            double left = (x + column0) * charWidth, room = columns * charWidth, advance = ft.WidthIncludingTrailingWhitespace;
+                            if (fits || advance <= 0) texts.Add((ft, new Point(left, y + dy), 1));
+                            else if (advance > room)
+                            {
+                                double scale = Math.Max(0.3, room / advance);
+                                texts.Add((ft, new Point(left, y + dy + ft.Height * (1 - scale) / 2), scale));
+                            }
+                            // On the text's baseline: a fallback font has its own (a non-breaking hyphen sat low, like "_").
+                            else texts.Add((ft, new Point(left + (room - advance) / 2, y + dy + frame.Baseline - ft.Baseline), 1));
+                        }
                     x += width;
                     k = j;
                 }

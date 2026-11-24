@@ -2,6 +2,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using EelDitor.App.Editor;
 using EelDitor.App.Services;
+using EelDitor.Core.Html;
 using EelDitor.Markdown;
 
 namespace EelDitor.App.Views;
@@ -105,19 +106,50 @@ public partial class MainWindow
         if (Editor.IsReadOnly) return;
         if (_markdown is null) { await PasteTextAsync(); return; }
         var (html, text) = await ReadClipboardAsync();
+        await PasteContentAsync(html, text);
+    }
+
+    /// <summary>Pastes what the clipboard holds (its HTML and its text) into a Markdown document.</summary>
+    internal async Task PasteContentAsync(string? html, string? text)
+    {
+        if (_markdown is null || Editor.IsReadOnly) return;
         var lines = MarkdownCommands.TableAtCaret(Editor, _markdown) is var (table, _, _) ? RowsToPaste(html, text, table.ColumnCount) : null;
         if (lines is { Count: > 0 } && MarkdownCommands.TableAtCaret(Editor, _markdown) is var (t, row, _))
         {
             PasteRows(t, row, lines);
             return;
         }
-        // Outside a table: a table from Word or a web page becomes a Markdown table (plain text pastes as usual).
+        // Outside a table: text from Word (Outlook, LibreOffice, Google Docs) keeps its lists, tables, headings and
+        // styles as Markdown; a table from a web page becomes a Markdown table (other text pastes as usual).
+        if (html is not null && HtmlToMarkdown.IsFromWordProcessor(html) && HtmlToMarkdown.Convert(html) is { Length: > 0 } markdown)
+        {
+            await PasteTextAsync(OnLinesOfItsOwn(markdown));
+            return;
+        }
         if (html is not null && TableClipboard.FromHtml(html) is { Count: > 0 } rows && TableClipboard.MarkdownRows(text ?? "") is null)
         {
             InsertNewTable(rows, TableClipboard.HasHeader(html));
             return;
         }
         await PasteTextAsync();
+    }
+
+    /// <summary>
+    /// Blocks pasted from Word (several lines: paragraphs, a list, a table) go on lines of their own: text before the
+    /// caret on its line is ended with a line break, and text after it moves to the next line. (A table pasted at the
+    /// start of a line joined that line into its last row.) A single line of text goes into the line as typed.
+    /// </summary>
+    private string OnLinesOfItsOwn(string markdown)
+    {
+        if (!markdown.Contains('\n')) return markdown;
+        var doc = Editor.Document;
+        int start = Editor.SelectionLength > 0 ? Editor.SelectionStart : Editor.CaretOffset;
+        int end = Editor.SelectionLength > 0 ? Editor.SelectionStart + Editor.SelectionLength : start;
+        var first = doc.GetLineByOffset(start);
+        var last = doc.GetLineByOffset(end);
+        bool textBefore = doc.GetText(first.Offset, start - first.Offset).Trim().Length > 0;
+        bool textAfter = doc.GetText(end, last.EndOffset - end).Trim().Length > 0;
+        return (textBefore ? "\n\n" : "") + markdown + (textAfter ? "\n\n" : "");
     }
 
     /// <summary>AvaloniaEdit's clipboard format for a rectangular (column) selection.</summary>
@@ -129,15 +161,21 @@ public partial class MainWindow
     /// follow the document's, so a paste does not mix them. A rectangular copy still goes through AvaloniaEdit, which
     /// pastes it as a block.
     /// </summary>
-    private async Task PasteTextAsync()
+    /// <param name="converted">Text to paste instead of the clipboard's (the Markdown made from Word's HTML).</param>
+    private async Task PasteTextAsync(string? converted = null)
     {
-        if (Clipboard is not { } clipboard) { Editor.Paste(); return; }
-        try
+        string? text = converted;
+        if (text is null)
         {
-            if ((await clipboard.GetFormatsAsync()).Contains(RectangularFormat)) { Editor.Paste(); return; }
+            if (Clipboard is not { } clipboard) { Editor.Paste(); return; }
+            try
+            {
+                if ((await clipboard.GetFormatsAsync()).Contains(RectangularFormat)) { Editor.Paste(); return; }
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { } // a clipboard another program filled badly
+            text = await clipboard.TryGetTextAsync();
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { } // a clipboard another program filled badly
-        if (await clipboard.TryGetTextAsync() is not { Length: > 0 } text || Editor.IsReadOnly) return;
+        if (string.IsNullOrEmpty(text) || Editor.IsReadOnly) return;
         var area = Editor.TextArea;
         string newLine = AvaloniaEdit.Document.TextUtilities.GetNewLineFromDocument(Editor.Document, area.Caret.Line);
         text = AvaloniaEdit.Document.TextUtilities.NormalizeNewLines(text, newLine);

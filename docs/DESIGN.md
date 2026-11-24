@@ -75,6 +75,13 @@ test builds away from the running app's folder.
   warning bar with an explicit "unify" action — never automatic. EOL conversion is an explicit menu command.
 - **Encoding menu has two different operations:** "reopen as" (reinterpret bytes) and "convert to" (change how it is
   saved). Unencodable characters on save produce a warning listing the lines.
+- **Pasting from Word** (Outlook, LibreOffice, Google Docs: recognised by their HTML) into a Markdown file keeps what
+  Markdown can hold: paragraphs, headings, bulleted and numbered lists (Word writes lists as paragraphs with
+  `mso-list` styles and the number typed in; nesting comes from their level), tables (a first row that is all bold, or
+  marked as a header, becomes the header), bold, italic, strikethrough, links, quotes, code. Fonts, colours and images
+  are left out. HTML from web pages still pastes as plain text (only a table becomes a Markdown table): a snippet copied
+  from a page should not turn into markup. Edit → Paste as plain text always takes the text alone.
+  `HtmlToMarkdown` (Core) does the conversion with the preview's `HtmlParser`; no library.
 - **Atomic save** via a temp file and replace, keeping attributes.
 - **Dirty marker (●)** compares the text with the file on disk shortly after an edit (files ≤ 4 MB), so typing and
   deleting a character by hand clears it. It is not derived from the undo stack alone.
@@ -99,6 +106,14 @@ test builds away from the running app's folder.
 - The sidebar has tabs: Open files, Git, Map (document map). The first is named "Open files", not "Files", so it is
   not mistaken for a browser of the disk. Paths (also in the Git tab) are shortened by whole leading folders.
 - "Display as ›" in the file context menu replaces a global Language menu.
+- **How the files are listed**: three buttons under the filter, joined into one low bar like the Git tab's actions (`ButtonBar`): *Folders* (the groups above,
+  the default), *Name* (one flat list, alphabetical) and *Date* (one flat list, the most recently modified on disk
+  first; it re-sorts after a save or reload). Pinned files stay first in every mode; the choice is remembered.
+- **Map** (document map): a line of the document has different heights in the map (one thin line) and in the editor
+  (wrapped paragraphs, tables as grids), so the frame and the clicks are mapped line by line through both views'
+  heights. The map scrolls with the editor like a scrollbar (the frame at its top at the start of the document, at its
+  bottom at the end), and dragging the frame moves the editor proportionally, so both ends are reachable. (A single
+  default line height for both put the frame in the wrong place and left the end out of reach.)
 - **The current file's header** (name and folder above the editor) is larger than the rest of the chrome (name 15 px,
   folder 12.5 px, 34 px high): the open file is the reference point of the whole window, including the Git and Map
   tabs, so it must stand out.
@@ -167,7 +182,9 @@ editing never does by itself (see above).
 **Links.** Besides `[text](url)`, bare addresses (`https://…`, `http://…`, `www.…`, `mailto:…`, GFM autolink rules:
 trailing punctuation and an unbalanced `)` are not part of the address) and autolinks `<https://…>`, `<a@b.org>` are
 links: underlined in the accent colour, opaque to emphasis (`a_b_c` in a URL stays as written), opened by Ctrl+click
-(a plain click places the caret, as in Visual Studio). Outside the Markdown view (plain text, code, raw mode)
+(a plain click places the caret, as in Visual Studio). In a table drawn as a grid the link is found through the
+character under the pointer (the row is one element), so Ctrl+click and the address tooltip work in grid cells and in
+the cell editor too; Ctrl+click elsewhere in a grid acts as a plain click (AvaloniaEdit's own selected whole rows). Outside the Markdown view (plain text, code, raw mode)
 `PlainLinks` underlines and opens bare addresses the same way. Only web and mail addresses go to the system; paths
 open in the editor; nothing else is executed. AvaloniaEdit's own hyperlinks stay off (they would conflict with
 hidden markup and open any URI scheme).
@@ -191,8 +208,19 @@ keeps its original spacing.
 
 **Grid (word wrap on).** A table row is drawn as an ASCII-style box grid (`TableRowElement`, one element for the whole
 line) with text wrapped inside cells (`TableWrap`). ASCII-style borders were chosen over continuous lines because the
-continuous version misaligned text in the first rows. Column widths: natural widths when they fit; otherwise narrow
-columns keep their width and wide ones share the rest.
+continuous version misaligned text in the first rows. Column widths: natural widths when they fit; otherwise each
+column gets at least its longest word (up to an equal share) and at most its natural width, the rest is shared in
+proportion to the amount of text, then single columns of width move between columns while the table gets shorter
+(wrapped as the grid wraps). Equal shares of the wide columns (the earlier rule) made a column of long descriptions as
+narrow as one of short notes, so its rows were tall and the notes half empty; equal shares are still used when they
+give a shorter table. The work is bounded, so typing in a large table stays quick.
+- **Every character on its own columns.** A grid row is drawn run by run; a character drawn wider or narrower than the
+  columns it is counted for (an emoji or symbol from a fallback font, a non-breaking hyphen) is drawn alone, made
+  smaller to fit or centred: drawn inside a run, it pushed the rest of the run into the next characters ("(" over a
+  link) or over the cell's border; it sits on the text's baseline (a fallback font's own put a non-breaking hyphen low,
+  like "_"). Emoji shown as emoji by default (✅ ❌ ⭐, East Asian Width W) count as two columns, and a character above
+  U+2000 the editor's font lacks counts as wide as its fallback font really draws it (measured once per character,
+  `SymbolWidths`): ✔ ✖ ◍ come from the emoji font about two columns wide, and counted as one they were shrunk to dots.
 - A grid row is **not editable in place** (one source line ↔ many drawn lines). Editing goes through the cell editor
   (double click / command). The caret on a grid row is hidden (`CaretBrush` transparent) and **the current cell** — the
   one whose source contains the caret — is outlined instead: cells are what operations act on (editing, Tab). A click
@@ -219,7 +247,20 @@ columns keep their width and wide ones share the rest.
 - **Editing a grid cell looks like editing in place**: the cell editor has no frame and the cell's background, lies
   exactly over the cell's text (inside the current cell's outline), wraps at the cell's width and is as tall as the
   text. Every change is written into the row at once, so the row and its neighbours follow the typing; the whole edit
-  is one undo step, and Esc puts the row back exactly as it was. A change that would break the row is not written and
+  is one undo step (Ctrl+Z puts the row back exactly as it was).
+- **Keys of the cell editor** (user's decision): Enter starts a new line in the cell (a `<br>`), as Shift+Enter does;
+  Ctrl+Enter, Esc or a click elsewhere end the edit and keep it, like in a spreadsheet (Shift+Enter alone was not
+  discoverable). Tab / Shift+Tab and an arrow at the edge of the text (before the first or after the last shown
+  character, on the first or last drawn line) go on to the neighbouring cell, still editing. A click on the menu or the
+  toolbar does not end the edit: the style commands (bold, highlight, clear formatting…) apply to the text selected in
+  the cell editor, any other command ends the edit first. (The popup's light dismiss is not used: it swallowed the
+  click, so such a click only closed the editor and the style went to the whole cell. A menu's items are in a popup of
+  their own, whose clicks reach the window too: clicks in any popup do not end the edit.) The edit also ends when the
+  window is left (the popup is a window above the others).
+- **A style over a `<br>`** (`==one<br>two==`) is one span in the row, but in the cell editor a span cannot cross a
+  line break and its markers showed. The editor gets the style closed and opened again around the break
+  (`==one==` / `==two==`), and saving joins it back where those markers are still as made, so the row is written as
+  before. A change that would break the row is not written and
   is reported on the status bar. Spaces typed after the text (not part of the cell's width yet) widen the editor too,
   so they do not wrap to the next line. There are no hints in the editor. True in-place editing (no editor at all) would need
   a caret, selection, input and IME of our own for grid rows — AvaloniaEdit lays a line out as one flow of elements,
@@ -244,7 +285,7 @@ characters wide, up to 75 % of the view tall). It shows the cell's Markdown with
 display; style shortcuts work inside. Saving goes through `TableCellEdit.ApplySource`, which guarantees the table is
 never broken: bare `|` escaped, backticks that would swallow following cells escaped, trailing backslash doubled; the
 row must keep the same number of cells and the other cells unchanged — otherwise nothing is written and the reason is
-shown. Line breaks (Shift+Enter) are saved as `<br>`; an unchanged cell keeps its tags as written. Hints in the editor
+shown. Line breaks (Enter) are saved as `<br>`; an unchanged cell keeps its tags as written. Hints in the editor
 are minimal (no style hints).
 
 **Alt+Q / long-line wrap never touch tables.** Long table rows are left long; with word wrap on they are shown as a grid.
@@ -345,6 +386,11 @@ diff-friendly mode.
   lines…") goes as soon as the text changes; state derived from the text (line endings, the file's line-break
   convention, the longest line, conflicts, the dirty marker) is recomputed from the text after edits (debounced),
   never kept from the last command. Choices the user made ("Leave as is" for mixed endings) are kept.
+- **Insert special character…** (Edit menu): any Unicode character, category by category (punctuation, spaces and
+  invisible characters with their names, arrows, mathematics, scripts, numbers, currencies, Latin with diacritics,
+  Greek, Cyrillic, box drawing, shapes, symbols, technical, emoji), never all mixed together as in Word; recently used
+  first; a search takes the character itself or its code (U+2713). A click inserts at the caret and the window stays
+  open. .NET has no Unicode character names, so there is no search by name.
 - Comparison commands say what they do: "Diff vs HEAD", "Diff vs version on disk", "Diff vs another file…".
 - **Menus are shallow where work happens often:** tables have a top-level Table menu; the Markdown menu lists the
   heading levels in place (no submenu); the plain-text view of Markdown is a View option.
@@ -433,6 +479,9 @@ diff-friendly mode.
 | "Show all characters" marks (ShowSpaces/ShowTabs/ShowEndOfLine) are elements in the line: ␍ ␊ are missing from Consolas, so a fallback font with a taller line changed line heights; a space mark is a normal-size space, so headings got narrower | `WhitespaceMarks` draws ·, → and ␍␊ beside the text, outside the layout; AvaloniaEdit's options stay off |
 | Table rows are repainted often (scrolling, caret, height primer) | `TableRowRun` shapes its text once and keeps it until the row is rebuilt |
 | `Application.FindResource` cannot see theme dictionaries | `Themed` binds code-built controls to theme resources |
+| When the text gets shorter (a wider window: table rows wrap less), the ScrollViewer moves its offset back to the end but the TextView keeps the old one, showing up to a whole empty screen past the last line; setting the ScrollViewer then does nothing | `EditorScroll.KeepOnText` sets the TextView's own offset (`ILogicalScrollable`) after layout |
+| Avalonia makes an emoji font (Segoe UI Emoji) bold by itself and draws it white; and asked for normal weight it takes the nearest glyph typeface it already has, so when the first emoji of the session was bold (a bold line in raw mode, from the TextMate theme), every emoji was white until a restart (verified, Avalonia 11.3; reproduced in the app) | `SymbolText.WarmUp` loads the normal faces of the symbol fonts at start; symbols and emoji are never bold: `SymbolWeight` (the editor's last line transformer, every mode), the Markdown colorizer, grid rows, the preview |
+| On a grid row, `GridTextSelection`'s press handler runs before `MarkdownView`'s and marks the press handled | it leaves a Ctrl+click on a link alone, so the link opens |
 
 ---
 

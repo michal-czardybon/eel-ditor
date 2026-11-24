@@ -13,6 +13,68 @@ public static partial class TableCellEdit
 {
     public enum Problem { None, CellCount, OtherCells }
 
+    /// <summary>A line break of the cell editor's text where styles were closed before it and opened again after it.</summary>
+    public readonly record struct SplitBreak(int Newline, string Close, string Open);
+
+    private const MdStyle SplittableAtBreak = MdStyle.Bold | MdStyle.Italic | MdStyle.Strike | MdStyle.Highlight | MdStyle.Subscript | MdStyle.Superscript;
+
+    /// <summary>
+    /// The cell's text for the cell editor: each <c>&lt;br&gt;</c> becomes a line break. In the row a style may run
+    /// over a <c>&lt;br&gt;</c> (<c>==one&lt;br&gt;two==</c>), but in the editor a style cannot run over a line break and
+    /// its markers would show; such styles are closed before the break and opened again after it
+    /// (<c>==one==\n==two==</c>), and <see cref="JoinSplitStyles"/> undoes that before the text is written back.
+    /// </summary>
+    public static (string Text, List<SplitBreak> Splits) CellEditorText(string line, TableCell cell, LineRender render)
+    {
+        int cs = cell.ContentStart(line), ce = cell.ContentEnd(line);
+        var splits = new List<SplitBreak>();
+        if (ce <= cs) return ("", splits);
+        var sb = new StringBuilder();
+        int at = cs;
+        foreach (var br in render.Breaks.Where(b => b.Start >= cs && b.End <= ce).OrderBy(b => b.Start))
+        {
+            sb.Append(line, at, br.Start - at);
+            while (sb.Length > 0 && sb[^1] == ' ') sb.Length--;
+            // The styles running over the break, outermost first, with their markers as written.
+            var open = render.Styles
+                .Where(s => s.Start <= br.Start && s.End >= br.End && (s.Style & SplittableAtBreak) != 0 && (s.Style & (MdStyle.Code | MdStyle.Link)) == 0)
+                .Select(s => (Span: s,
+                    Opening: render.Hidden.FirstOrDefault(h => h.End == s.Start && h.Length > 0),
+                    Closing: render.Hidden.FirstOrDefault(h => h.Start == s.End && h.Length > 0)))
+                .Where(x => x.Opening.Length > 0 && x.Closing.Length > 0)
+                .OrderBy(x => x.Span.Start).ThenByDescending(x => x.Span.End)
+                .ToList();
+            string close = string.Concat(Enumerable.Reverse(open).Select(x => line.Substring(x.Closing.Start, x.Closing.Length)));
+            string reopen = string.Concat(open.Select(x => line.Substring(x.Opening.Start, x.Opening.Length)));
+            sb.Append(close);
+            int newline = sb.Length;
+            sb.Append('\n').Append(reopen);
+            if (open.Count > 0) splits.Add(new SplitBreak(newline, close, reopen));
+            at = br.End;
+            while (at < ce && line[at] == ' ') at++;
+        }
+        sb.Append(line, at, ce - at);
+        return (sb.ToString(), splits);
+    }
+
+    /// <summary>
+    /// Joins the styles <see cref="CellEditorText"/> split at line breaks again (<c>==one==\n==two==</c> →
+    /// <c>==one\ntwo==</c>), where the markers around the break (at <paramref name="newlines"/>' offsets now) are
+    /// still exactly as they were made.
+    /// </summary>
+    public static string JoinSplitStyles(string text, IEnumerable<SplitBreak> newlines)
+    {
+        foreach (var s in newlines.OrderByDescending(s => s.Newline))
+        {
+            int n = s.Newline;
+            if (n < s.Close.Length || n >= text.Length || text[n] != '\n') continue;
+            if (string.CompareOrdinal(text, n - s.Close.Length, s.Close, 0, s.Close.Length) != 0) continue;
+            if (n + 1 + s.Open.Length > text.Length || string.CompareOrdinal(text, n + 1, s.Open, 0, s.Open.Length) != 0) continue;
+            text = text[..(n - s.Close.Length)] + "\n" + text[(n + 1 + s.Open.Length)..];
+        }
+        return text;
+    }
+
     public sealed record Result(string? NewLine, Problem Problem)
     {
         public bool Ok => Problem == Problem.None;

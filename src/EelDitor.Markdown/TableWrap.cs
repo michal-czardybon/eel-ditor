@@ -71,6 +71,159 @@ public static class TableWrap
         return widths;
     }
 
+    /// <summary>What a column holds, for sharing the width: the widths of the words of every cell, row by row.</summary>
+    public sealed class ColumnText
+    {
+        /// <summary>For each row, the cell's lines (a <c>&lt;br&gt;</c> starts a line), each as the widths of its words.</summary>
+        public List<int[][]> Cells { get; } = [];
+
+        /// <summary>The widest line (the width without wrapping).</summary>
+        public int Natural { get; set; }
+
+        /// <summary>The longest word: narrower than this, a word is cut.</summary>
+        public int LongestWord { get; set; }
+
+        /// <summary>All the text, in columns (for sharing the width in proportion to it).</summary>
+        public int Amount { get; set; }
+    }
+
+    /// <summary>The text of every column of a table (header and body rows), for <see cref="ColumnWidths(IReadOnlyList{ColumnText}, int)"/>.</summary>
+    public static ColumnText[] ColumnTexts(MarkdownTable table, ILineSource source, Func<int, LineRender> render)
+    {
+        var columns = Enumerable.Range(0, table.ColumnCount).Select(_ => new ColumnText()).ToArray();
+        foreach (var row in table.Rows)
+        {
+            if (row.Kind == MdLineKind.TableSeparator) continue;
+            string line = source.GetLine(row.LineIndex);
+            var r = render(row.LineIndex);
+            for (int c = 0; c < columns.Length; c++)
+            {
+                string text = c < row.Cells.Count ? CellText(line, row.Cells[c], r) : "";
+                var lines = text.Split('\n').Select(part => part.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(w => TextWidth.Of(w)).ToArray()).ToArray();
+                var column = columns[c];
+                column.Cells.Add(lines);
+                foreach (var words in lines)
+                {
+                    int width = words.Sum() + Math.Max(0, words.Length - 1);
+                    column.Natural = Math.Max(column.Natural, width);
+                    column.Amount += width;
+                    if (words.Length > 0) column.LongestWord = Math.Max(column.LongestWord, words.Max());
+                }
+            }
+        }
+        return columns;
+    }
+
+    /// <summary>
+    /// Column widths that fit <paramref name="available"/> cells, sharing the space by how much text each column has:
+    /// <list type="number">
+    /// <item>The natural widths when they fit.</item>
+    /// <item>Otherwise every column gets at least its longest word (up to an equal share of the width, so a long URL
+    /// does not take it all) and at most its natural width; the rest is shared in proportion to the amount of text,
+    /// so a column of long descriptions gets more room than a column of short notes (equal shares made the long
+    /// texts tall and left the short ones half empty).</item>
+    /// <item>Then single columns of width move between columns while that makes the table shorter (the tallest cell
+    /// of each row, wrapped as the grid wraps it), which helps rows with one long cell.</item>
+    /// <item>The old equal shares are kept when they still give a shorter table.</item>
+    /// </list>
+    /// </summary>
+    public static int[] ColumnWidths(IReadOnlyList<ColumnText> columns, int available)
+    {
+        int n = columns.Count;
+        var natural = columns.Select(c => Math.Max(1, c.Natural)).ToArray();
+        int content = available - (n * 3 + 1);
+        if (n == 0 || natural.Sum() <= content) return natural;
+        var equal = ColumnWidths((IReadOnlyList<int>)natural, available);
+        content = Math.Max(content, n * MinColumnWidth);
+        int fair = Math.Max(MinColumnWidth, content / n);
+        var min = Enumerable.Range(0, n)
+            .Select(c => Math.Min(natural[c], Math.Max(MinColumnWidth, Math.Min(columns[c].LongestWord, fair)))).ToArray();
+        if (min.Sum() > content) return equal; // very narrow
+        var amount = columns.Select(c => Math.Max(1.0, c.Amount)).ToArray();
+
+        // Water filling: width = amount × k, kept between the minimum and the natural width; k so that they fill the space.
+        double Total(double k) => Enumerable.Range(0, n).Sum(c => Math.Clamp(amount[c] * k, min[c], natural[c]));
+        double lo = 0, hi = natural.Max() / amount.Min() + 1;
+        for (int i = 0; i < 60; i++)
+        {
+            double mid = (lo + hi) / 2;
+            if (Total(mid) > content) hi = mid; else lo = mid;
+        }
+        var exact = Enumerable.Range(0, n).Select(c => Math.Clamp(amount[c] * lo, min[c], natural[c])).ToArray();
+        var widths = exact.Select(w => (int)Math.Floor(w)).ToArray();
+        // The cells left by rounding down: to the columns that lost the most, while they are below their natural width.
+        int left = content - widths.Sum();
+        foreach (int c in Enumerable.Range(0, n).OrderByDescending(c => exact[c] - widths[c]))
+        {
+            if (left <= 0) break;
+            if (widths[c] < natural[c]) { widths[c]++; left--; }
+        }
+
+        Improve(columns, widths, min, natural);
+        return Height(columns, equal) < Height(columns, widths) ? equal : widths;
+    }
+
+    /// <summary>How many lines a cell's line takes, wrapped at <paramref name="width"/> as <see cref="WrapRanges"/> does.</summary>
+    private static int WrappedLines(int[] words, int width)
+    {
+        int lines = 1, column = 0;
+        bool empty = true;
+        foreach (int w in words)
+        {
+            if (!empty && column + 1 + w <= width) { column += 1 + w; continue; }
+            if (!empty) lines++;
+            int rest = w;
+            while (rest > width) { lines++; rest -= width; } // a long word is cut
+            column = rest;
+            empty = false;
+        }
+        return lines;
+    }
+
+    /// <summary>The height of the table in drawn lines: the tallest cell of each row.</summary>
+    private static long Height(IReadOnlyList<ColumnText> columns, int[] widths)
+    {
+        long total = 0;
+        int rows = columns.Count == 0 ? 0 : columns[0].Cells.Count;
+        for (int r = 0; r < rows; r++)
+        {
+            int tallest = 1;
+            for (int c = 0; c < widths.Length; c++)
+            {
+                int lines = 0;
+                foreach (var words in columns[c].Cells[r]) lines += WrappedLines(words, Math.Max(1, widths[c]));
+                tallest = Math.Max(tallest, lines);
+            }
+            total += tallest;
+        }
+        return total;
+    }
+
+    /// <summary>Moves single columns of width from one column to another while the table gets shorter.</summary>
+    private static void Improve(IReadOnlyList<ColumnText> columns, int[] widths, int[] min, int[] natural)
+    {
+        int n = widths.Length;
+        long words = columns.Sum(c => c.Cells.Sum(cell => cell.Sum(l => l.Length + 1)));
+        if (n < 2 || words == 0) return;
+        // Bounded work (about a million words wrapped), so typing in a large table stays quick.
+        int passes = (int)Math.Clamp(1_000_000 / Math.Max(1, words * n * n), 0, 40);
+        long best = Height(columns, widths);
+        for (int pass = 0; pass < passes; pass++)
+        {
+            bool improved = false;
+            for (int from = 0; from < n; from++)
+                for (int to = 0; to < n; to++)
+                {
+                    if (from == to || widths[from] <= min[from] || widths[to] >= natural[to]) continue;
+                    widths[from]--; widths[to]++;
+                    long h = Height(columns, widths);
+                    if (h < best) { best = h; improved = true; }
+                    else { widths[from]++; widths[to]--; }
+                }
+            if (!improved) break;
+        }
+    }
+
     /// <summary>Word wrap to <paramref name="width"/> cells; a word longer than the width is cut.</summary>
     public static List<string> WrapCell(string text, int width) =>
         WrapRanges(text, width).Select(r => text.Substring(r.Start, r.Length)).ToList();

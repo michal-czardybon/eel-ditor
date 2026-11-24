@@ -165,6 +165,7 @@ public partial class MainWindow
         doc.IsLossyDecode = loaded.IsLossy;
         doc.LastKnownHash = hash;
         doc.LastWriteTimeUtc = File.GetLastWriteTimeUtc(doc.FilePath);
+        ResortByDate();
         doc.FileSize = loaded.FileSize;
         doc.DiskState = DiskState.Normal;
         doc.MarkSaved();
@@ -216,6 +217,7 @@ public partial class MainWindow
             var bytes = TextFile.Encode(text, encoding);
             doc.LastKnownHash = Convert.ToHexString(SHA1.HashData(bytes));
             doc.LastWriteTimeUtc = await TextFile.SaveAsync(path, text, encoding);
+            ResortByDate();
             doc.FileSize = bytes.LongLength;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -345,6 +347,7 @@ public partial class MainWindow
             });
             if (hash is null) return;
             doc.LastWriteTimeUtc = stamp.LastWriteUtc;
+            ResortByDate();
             doc.FileSize = stamp.Length;
             if (hash == doc.LastKnownHash) return;
 
@@ -607,5 +610,11 @@ public partial class MainWindow
                 if (indent != text[..i]) doc.Replace(line.Offset, i, indent);
             }
         }
+    }
+
+    /// <summary>A flat list by modification time follows saves and reloads.</summary>
+    private void ResortByDate()
+    {
+        if (_files.Mode == FileListMode.Modified) _files.Rebuild();
     }
 }

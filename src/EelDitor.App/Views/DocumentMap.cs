@@ -48,7 +48,8 @@ public sealed class DocumentMap : Border
         Child = _map;
 
         editor.TextArea.TextView.ScrollOffsetChanged += (_, _) => Sync();
-        editor.TextArea.TextView.VisualLinesChanged += (_, _) => _map.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
+        // Heights in the editor change as lines are measured (tables, wrapped paragraphs): the frame follows.
+        editor.TextArea.TextView.VisualLinesChanged += (_, _) => Sync();
         editor.DocumentChanged += (_, _) => SetDocument(editor.Document);
         SizeChanged += (_, _) => Sync();
         SetDocument(editor.Document);
@@ -69,57 +70,115 @@ public sealed class DocumentMap : Border
         _map.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
     }
 
-    /// <summary>First and last document lines visible in the editor.</summary>
-    private (int First, int Last) EditorViewport()
+    /// <summary>
+    /// A point of the document in the other view: the line at <paramref name="y"/> (document coordinates of
+    /// <paramref name="from"/>) and how far down it, at the same place of that line in <paramref name="to"/>. Lines have
+    /// different heights in the two views (wrapped paragraphs and tables as grids in the editor, one thin line each in
+    /// the map), so the mapping goes line by line; a single default line height for both put the frame in the wrong
+    /// place and kept the end of the document out of reach.
+    /// </summary>
+    private static double MapY(TextView from, TextView to, double y)
     {
-        var tv = _editor.TextArea.TextView;
-        if (!tv.VisualLinesValid || tv.VisualLines.Count == 0 || _editor.Document is null) return (1, 1);
-        return (tv.VisualLines[0].FirstDocumentLine.LineNumber, tv.VisualLines[^1].LastDocumentLine.LineNumber);
+        var doc = from.Document;
+        if (doc is null || doc.LineCount == 0) return 0;
+        y = Math.Clamp(y, 0, Math.Max(0, from.DocumentHeight));
+        var line = from.GetDocumentLineByVisualTop(y) ?? doc.GetLineByNumber(doc.LineCount);
+        double top = from.GetVisualTopByDocumentLine(line.LineNumber);
+        double bottom = line.LineNumber < doc.LineCount ? from.GetVisualTopByDocumentLine(line.LineNumber + 1) : from.DocumentHeight;
+        double fraction = bottom > top ? Math.Clamp((y - top) / (bottom - top), 0, 1) : 0;
+        double toTop = to.GetVisualTopByDocumentLine(line.LineNumber);
+        double toBottom = line.LineNumber < doc.LineCount ? to.GetVisualTopByDocumentLine(line.LineNumber + 1) : to.DocumentHeight;
+        return toTop + fraction * Math.Max(0, toBottom - toTop);
     }
 
-    /// <summary>Scrolls the map proportionally so the editor's viewport is always inside it.</summary>
+    private TextView EditorView => _editor.TextArea.TextView;
+
+    private TextView MapView => _map.TextArea.TextView;
+
+    /// <summary>The part of the document visible in the editor, in the map's document coordinates.</summary>
+    internal (double Top, double Height) Frame()
+    {
+        var etv = EditorView;
+        if (_editor.Document is null || !ReferenceEquals(_editor.Document, _map.Document)) return (0, 0);
+        double top = MapY(etv, MapView, etv.VerticalOffset);
+        double bottom = MapY(etv, MapView, etv.VerticalOffset + etv.Bounds.Height);
+        return (top, Math.Max(bottom - top, 2 * MapView.DefaultLineHeight));
+    }
+
+    /// <summary>How far the editor is scrolled, from 0 (top) to 1 (bottom).</summary>
+    private double EditorFraction()
+    {
+        var etv = EditorView;
+        double range = etv.DocumentHeight - etv.Bounds.Height;
+        return range > 0 ? Math.Clamp(etv.VerticalOffset / range, 0, 1) : 0;
+    }
+
+    /// <summary>
+    /// Scrolls the map with the editor, like a scrollbar: the frame is at the top of the map when the editor shows the
+    /// start of the document and at the bottom when it shows the end, always inside the map.
+    /// </summary>
     private void Sync()
     {
-        var doc = _map.Document;
-        if (doc is null) return;
-        var mtv = _map.TextArea.TextView;
-        double lineHeight = mtv.DefaultLineHeight;
-        double extent = doc.LineCount * lineHeight;
-        double viewport = Bounds.Height;
-        var (first, _) = EditorViewport();
-        var etv = _editor.TextArea.TextView;
-        double editorExtent = Math.Max(1, etv.DocumentHeight - etv.Bounds.Height);
-        double fraction = Math.Clamp(etv.VerticalOffset / editorExtent, 0, 1);
-        double offset = extent > viewport ? fraction * (extent - viewport) : 0;
+        if (_map.Document is null) return;
+        var mtv = MapView;
+        double viewport = Bounds.Height, extent = mtv.DocumentHeight;
+        double offset = 0;
+        if (extent > viewport && viewport > 0)
+        {
+            var (top, height) = Frame();
+            offset = Math.Clamp(top - EditorFraction() * (viewport - height), 0, extent - viewport);
+        }
         _map.SetVerticalOffset(offset);
         mtv.InvalidateLayer(KnownLayer.Background);
     }
 
-    private void ScrollEditorTo(Point p)
+    /// <summary>Where the pointer holds the frame (from its top) while dragging.</summary>
+    private double _grab;
+
+    /// <summary>
+    /// Scrolls the editor so the frame's top is at <paramref name="frameTop"/> in the map's own coordinates (from the
+    /// top of the visible map): proportionally when the map scrolls too, so dragging reaches both ends; directly when
+    /// the whole document fits in the map.
+    /// </summary>
+    private void MoveFrameTo(double frameTop)
     {
-        var doc = _editor.Document;
-        if (doc is null) return;
-        var mtv = _map.TextArea.TextView;
-        int line = Math.Clamp((int)((p.Y + mtv.VerticalOffset) / mtv.DefaultLineHeight) + 1, 1, doc.LineCount);
-        var etv = _editor.TextArea.TextView;
-        double target = etv.GetVisualTopByDocumentLine(line) - etv.Bounds.Height / 2;
-        _editor.SetVerticalOffset(Math.Max(0, target));
+        var etv = EditorView;
+        var mtv = MapView;
+        double viewport = Bounds.Height;
+        if (mtv.DocumentHeight > viewport)
+        {
+            double travel = viewport - Frame().Height;
+            double fraction = travel > 0 ? Math.Clamp(frameTop / travel, 0, 1) : 0;
+            _editor.SetVerticalOffset(fraction * Math.Max(0, etv.DocumentHeight - etv.Bounds.Height));
+        }
+        else _editor.SetVerticalOffset(Math.Max(0, MapY(mtv, etv, frameTop)));
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
-        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed || _editor.Document is null) return;
         _dragging = true;
         e.Pointer.Capture(this);
-        ScrollEditorTo(e.GetPosition(this));
+        double y = e.GetPosition(this).Y;
+        var (top, height) = Frame();
+        double screenTop = top - MapView.VerticalOffset;
+        if (y >= screenTop && y <= screenTop + height) _grab = y - screenTop;
+        else
+        {
+            // Outside the frame: that place comes to the middle of the editor, and dragging goes on from there.
+            var etv = EditorView;
+            double target = MapY(MapView, etv, y + MapView.VerticalOffset) - etv.Bounds.Height / 2;
+            _editor.SetVerticalOffset(Math.Clamp(target, 0, Math.Max(0, etv.DocumentHeight - etv.Bounds.Height)));
+            _grab = height / 2;
+        }
         e.Handled = true;
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
-        if (_dragging) ScrollEditorTo(e.GetPosition(this));
+        if (_dragging) MoveFrameTo(e.GetPosition(this).Y - _grab);
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -146,11 +205,9 @@ public sealed class DocumentMap : Border
         public void Draw(TextView textView, DrawingContext dc)
         {
             if (textView.Document is null) return;
-            var (first, last) = map.EditorViewport();
-            double h = textView.DefaultLineHeight;
-            double top = (first - 1) * h - textView.VerticalOffset;
-            double height = Math.Max(h * 4, (last - first + 1) * h);
-            dc.FillRectangle(Brush, new Rect(0, top, textView.Bounds.Width, height));
+            var (top, height) = map.Frame();
+            if (height <= 0) return;
+            dc.FillRectangle(Brush, new Rect(0, top - textView.VerticalOffset, textView.Bounds.Width, height));
         }
     }
 }

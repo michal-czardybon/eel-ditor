@@ -69,6 +69,7 @@ public class LinksAndRenumberTests
         window.MouseUp(inWindow, MouseButton.Left);
         Assert.Empty(opened);
 
+        Thread.Sleep(600); // not a double click (under load the two presses were taken for one)
         window.MouseDown(inWindow, MouseButton.Left, RawInputModifiers.Control);
         window.MouseUp(inWindow, MouseButton.Left, RawInputModifiers.Control);
         Assert.Equal(["https://www.example.org"], opened);

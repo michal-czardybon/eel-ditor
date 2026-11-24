@@ -530,12 +530,18 @@ internal sealed class HtmlRenderer
                 else { sb.Append(c); _lastSpace = false; }
             }
             if (sb.Length == 0) return;
-            var run = new Run(sb.ToString());
-            Apply(run, s);
-            _block.Inlines!.Add(run);
-            if (s.Link is not null) _links.Add((_length, _length + run.Text!.Length, s.Link));
-            _length += run.Text!.Length;
-            if (sb.ToString().Trim().Length > 0) _hasContent = true;
+            string all = sb.ToString();
+            // Symbols and emoji in bold text stay at normal weight (see SymbolText: bold made them white, for good).
+            var pieces = s.Bold && Editor.SymbolText.HasSymbol(all) ? Editor.SymbolText.Runs(all).ToList() : [(0, all.Length, false)];
+            foreach (var (start, length, symbols) in pieces)
+            {
+                var run = new Run(all.Substring(start, length));
+                Apply(run, symbols ? s with { Bold = false } : s);
+                _block.Inlines!.Add(run);
+            }
+            if (s.Link is not null) _links.Add((_length, _length + all.Length, s.Link));
+            _length += all.Length;
+            if (all.Trim().Length > 0) _hasContent = true;
         }
 
         public void AddBreak()

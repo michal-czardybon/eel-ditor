@@ -6,8 +6,10 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
+using AvaloniaEdit.Rendering;
 using EelDitor.App.Editor;
 using EelDitor.App.Services;
 using EelDitor.Markdown;
@@ -23,21 +25,61 @@ namespace EelDitor.App.Views;
 /// <item>Saving goes through <see cref="TableCellEdit.ApplySource"/>: | is escaped, backticks that would swallow
 /// the next cells are escaped, and the row must stay the same table row with the other cells unchanged —
 /// otherwise nothing is written and the editor says why. Only the changed part of the line is replaced.</item>
-/// <item>Enter saves, Esc cancels, Tab / Shift+Tab save and move to the next / previous cell; clicking elsewhere
-/// or scrolling saves too.</item>
+/// <item>Enter (and Shift+Enter) starts a new line in the cell (a <c>&lt;br&gt;</c>); Ctrl+Enter, Esc, clicking
+/// elsewhere or scrolling end the edit and keep it; Tab / Shift+Tab and the arrows at the edge of the text go on to the
+/// next / previous / neighbouring cell.</item>
 /// <item>In a grid it looks like editing in place: no frame, the cell's background, exactly over the cell's text and
 /// as wide; every change is written into the row at once (the row and its neighbours follow), the whole edit is one
-/// undo step, and Esc puts the row back as it was. Problems are reported on the status bar.</item>
+/// undo step (Ctrl+Z puts the row back as it was). Problems are reported on the status bar.</item>
 /// </list>
 /// </summary>
 public partial class MainWindow
 {
     private Popup? _cellPopup;
     private TextEditor? _cellEditor;
+    private MarkdownView? _cellView;
 
     internal TextEditor? CellEditor => _cellPopup is { IsOpen: true } ? _cellEditor : null;
 
+    internal MarkdownView? CellViewForTests => CellEditor is null ? null : _cellView;
+
     internal string? CellEditorError { get; private set; }
+
+    /// <summary>Ends a cell edit (keeping it, as a click elsewhere does).</summary>
+    private void CloseCellEditor()
+    {
+        if (_cellPopup is { IsOpen: true } popup) popup.IsOpen = false;
+    }
+
+    /// <summary>The keyboard goes back to the text: the cell being edited, or the editor.</summary>
+    private void FocusEditor()
+    {
+        if (CellEditor is { } cell) cell.TextArea.Focus();
+        else Editor.Focus();
+    }
+
+    /// <summary>
+    /// A click outside the cell editor ends the edit (keeping it), like in a spreadsheet; the click still does what it
+    /// does there. The menu and the toolbar are exceptions: their style commands apply to the cell's text, and every
+    /// other command ends the edit itself. (Not the popup's light dismiss: it swallowed the click, so a toolbar button
+    /// clicked during an edit only closed the editor, and styles went to the whole cell.)
+    /// </summary>
+    private void SetupCellEditorDismiss()
+    {
+        AddHandler(PointerPressedEvent, (_, e) =>
+        {
+            if (_cellPopup is not { IsOpen: true } popup || e.Source is not Avalonia.Visual source) return;
+            // A click in a popup (the cell editor itself, an open menu's items, a context menu) reaches this window's
+            // handlers too, but it is not a click elsewhere in the window: the menu items are in a popup of their own,
+            // not under the menu bar, so they closed the editor and a style from the menu went to the whole cell.
+            if (TopLevel.GetTopLevel(source) is { } top && !ReferenceEquals(top, this)) return;
+            if (popup.Child is { } child && (ReferenceEquals(child, source) || child.IsVisualAncestorOf(source))) return;
+            if (Toolbar.IsVisualAncestorOf(source) || MainMenu.IsVisualAncestorOf(source)) return;
+            popup.IsOpen = false;
+        }, RoutingStrategies.Tunnel, handledEventsToo: true);
+        // The popup is a window of its own, above the others: it must not stay when the user goes to another program.
+        Deactivated += (_, _) => Dispatcher.UIThread.Post(() => { if (!IsActive) CloseCellEditor(); });
+    }
 
     /// <summary>F2: the cell at the caret (the first cell of the row when the table is drawn as a grid).</summary>
     private void EditCellAtCaret()
@@ -70,11 +112,9 @@ public partial class MainWindow
         var line = Editor.Document.GetLineByNumber(lineNumber);
         string lineText = Editor.Document.GetText(line);
         var cell = row.Cells[cellIndex];
-        int cs = cell.ContentStart(lineText), ce = cell.ContentEnd(lineText);
-        string original = ce > cs ? lineText[cs..ce] : "";
-        // <br> tags are line breaks in the editor (Shift+Enter); saving turns the line breaks back into <br>.
-        foreach (var br in view.RenderFor(line).Breaks.Where(b => b.Start >= cs && b.End <= ce).OrderByDescending(b => b.Start))
-            original = original[..(br.Start - cs)].TrimEnd(' ') + "\n" + original[(br.End - cs)..].TrimStart(' ');
+        // <br> tags are line breaks in the editor (Enter); saving turns the line breaks back into <br>. Styles running
+        // over a <br> are closed and opened again around the line break (their markers would show), and joined on saving.
+        var (original, splits) = TableCellEdit.CellEditorText(lineText, cell, view.RenderFor(line));
 
         // In a grid the editor lies exactly over the cell's text and wraps at the cell's width, so the text keeps its
         // layout while it is edited; it is as tall as the text (plus a line to type into), so no scroll bar is needed.
@@ -105,8 +145,15 @@ public partial class MainWindow
         };
         editor.Options.EnableHyperlinks = false;
         editor.Options.HighlightCurrentLine = false;
+        var splitAnchors = splits.Select(sp => (Anchor: editor.Document.CreateAnchor(sp.Newline), Split: sp)).ToList();
+        // The editor's text as it goes into the row: the styles split at line breaks joined again.
+        string ForRow(string text) => splitAnchors.Count == 0 ? text
+            : TableCellEdit.JoinSplitStyles(text, splitAnchors.Where(a => !a.Anchor.IsDeleted).Select(a => a.Split with { Newline = a.Anchor.Offset }));
         editor.TextArea.SelectionBrush = Palette.Selection;
         var cellView = new MarkdownView(editor, editor.Document, Palette, _active?.DirectoryPath) { ShowImages = false };
+        // Ctrl+click on a link (and its tooltip) works in the cell being edited too.
+        var fromDocument = _active;
+        cellView.LinkActivated += url => { if (fromDocument is not null) _ = OpenLinkAsync(url, fromDocument); };
 
         // Problems (a change that would break the row) go to the status bar; in text mode also under the editor.
         var error = new TextBlock { FontSize = 12, Margin = new Thickness(4, 3, 4, 1), TextWrapping = Avalonia.Media.TextWrapping.Wrap, MaxWidth = Math.Max(width, 300), IsVisible = false }
@@ -122,7 +169,7 @@ public partial class MainWindow
             PlacementRect = rect,
             PlacementAnchor = PopupAnchor.TopLeft,
             PlacementGravity = PopupGravity.BottomRight,
-            IsLightDismissEnabled = true,
+            IsLightDismissEnabled = false, // see SetupCellEditorDismiss
             Child = inPlace
                 ? new Border { Child = panel, Background = Palette.Background }
                 : new Border { Child = panel, Padding = new Thickness(3), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(3) }
@@ -161,7 +208,7 @@ public partial class MainWindow
                 KeepCaretInCell();
                 return true;
             }
-            var problem = CommitCell(lineNumber, cellIndex, text);
+            var problem = CommitCell(lineNumber, cellIndex, ForRow(text));
             if (problem is null)
             {
                 committed = text;
@@ -216,7 +263,7 @@ public partial class MainWindow
                 if (cancelled && liveChanged && mainDoc.UndoStack.CanUndo) mainDoc.UndoStack.Undo();
             }
             cellView.Dispose();
-            if (ReferenceEquals(_cellPopup, popup)) { _cellPopup = null; _cellEditor = null; }
+            if (ReferenceEquals(_cellPopup, popup)) { _cellPopup = null; _cellEditor = null; _cellView = null; }
         };
         editor.TextArea.AddHandler(KeyDownEvent, (_, e) =>
         {
@@ -225,19 +272,26 @@ public partial class MainWindow
             bool plain = (e.KeyModifiers & ~KeyModifiers.Shift) == KeyModifiers.None;
             switch (e.Key)
             {
+                // Esc and Ctrl+Enter end the edit and keep it (Ctrl+Z takes it back in one step); a change that cannot be
+                // written is dropped and reported.
                 case Key.Escape:
-                    cancelled = true;
-                    popup.IsOpen = false;
-                    Editor.Focus();
+                case Key.Enter when ctrl:
                     e.Handled = true;
+                    if (!Save()) cancelled = true;
+                    popup.IsOpen = false;
+                    if (cancelled) SetStatusMessage(Loc.T("Table.CellNotSaved", CellEditorError ?? ""));
+                    Editor.Focus();
                     break;
-                case Key.Enter when shift && !ctrl:
-                    break; // a new line: a <br> in the cell
                 case Key.Enter:
+                    break; // a new line: a <br> in the cell (Shift+Enter too)
+                case Key.Left or Key.Right or Key.Up or Key.Down when e.KeyModifiers == KeyModifiers.None && AtCellEdge(editor, cellView, e.Key):
+                    // At the edge of the text the arrow goes on to the neighbouring cell, still editing.
+                    if (NeighbourCell(lineNumber, cellIndex, e.Key) is not { } next) break;
                     e.Handled = true;
                     if (!Save()) return;
                     popup.IsOpen = false;
-                    Editor.Focus();
+                    int atOffset = e.Key is Key.Left or Key.Up ? int.MaxValue : 0;
+                    Dispatcher.UIThread.Post(() => EditTableCell(next.Line, next.Cell, atOffset), DispatcherPriority.Background);
                     break;
                 case Key.Tab:
                     e.Handled = true;
@@ -282,6 +336,7 @@ public partial class MainWindow
 
         _cellPopup = popup;
         _cellEditor = editor;
+        _cellView = cellView;
         ((ISetLogicalParent)popup).SetParent(this);
         popup.IsOpen = true;
         editor.Focus();
@@ -417,6 +472,65 @@ public partial class MainWindow
                 }
                 return true;
         }
+    }
+
+    /// <summary>
+    /// Whether the cell editor's caret is at the edge of its text in the arrow's direction: before the first shown
+    /// character (Left), after the last one (Right), on the first drawn line (Up) or on the last one (Down).
+    /// Hidden markup at the ends does not count.
+    /// </summary>
+    internal static bool AtCellEdge(TextEditor editor, MarkdownView view, Key key)
+    {
+        if (editor.SelectionLength > 0) return false;
+        var doc = editor.Document;
+        int caret = editor.CaretOffset;
+        bool HiddenBetween(int from, int to)
+        {
+            for (int o = from; o < to; o++)
+            {
+                var line = doc.GetLineByOffset(o);
+                if (o == line.EndOffset || !view.RenderFor(line).IsHidden(o - line.Offset)) return false;
+            }
+            return true;
+        }
+        switch (key)
+        {
+            case Key.Left: return HiddenBetween(0, caret);
+            case Key.Right: return HiddenBetween(caret, doc.TextLength);
+        }
+        var tv = editor.TextArea.TextView;
+        tv.EnsureVisualLines();
+        double Top(int offset)
+        {
+            var location = doc.GetLocation(offset);
+            return tv.GetVisualPosition(new TextViewPosition(location), VisualYPosition.LineTop).Y;
+        }
+        double here = editor.TextArea.TextView.GetVisualPosition(editor.TextArea.Caret.Position, VisualYPosition.LineTop).Y;
+        return key == Key.Up ? here <= Top(0) + 0.5 : here >= Top(doc.TextLength) - 0.5;
+    }
+
+    /// <summary>
+    /// The cell an arrow key leads to from a cell: Left / Right the previous / next cell (at a row's edge the
+    /// previous row's last / the next row's first), Up / Down the same cell of the row above / below; the separator
+    /// is skipped. Null past the table's edge.
+    /// </summary>
+    private (int Line, int Cell)? NeighbourCell(int lineNumber, int cellIndex, Key key)
+    {
+        if (_markdown?.Model.TableAtLine(lineNumber - 1) is not { } table) return null;
+        int row = lineNumber - 1 - table.FirstLine;
+        bool horizontal = key is Key.Left or Key.Right;
+        int step = key is Key.Left or Key.Up ? -1 : 1;
+        if (horizontal)
+        {
+            int cell = cellIndex + step;
+            if (row >= 0 && row < table.Rows.Count && cell >= 0 && cell < table.Rows[row].Cells.Count) return (lineNumber, cell);
+        }
+        int target = row + step;
+        while (target >= 0 && target < table.Rows.Count && table.Rows[target].Kind == MdLineKind.TableSeparator) target += step;
+        if (target < 0 || target >= table.Rows.Count || table.Rows[target].Cells.Count == 0) return null;
+        int count = table.Rows[target].Cells.Count;
+        int to = horizontal ? (step < 0 ? count - 1 : 0) : Math.Min(cellIndex, count - 1);
+        return (table.FirstLine + target + 1, to);
     }
 
     private void MoveToCell(int lineNumber, int cellIndex, bool backwards)
