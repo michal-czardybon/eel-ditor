@@ -5,10 +5,12 @@
 #define AppName "Eel-ditor"
 #define AppExe "EelDitor.exe"
 #define SourceExe "..\publish\win-x64\" + AppExe
-#define AppVersion GetFileVersion(SourceExe)
-#if AppVersion == ""
+#define FileVersion GetFileVersion(SourceExe)
+#if FileVersion == ""
   #error Publish the application first (publish\win-x64\EelDitor.exe is missing).
 #endif
+; Three-part version (0.3.0): the fourth part of the file version is dropped.
+#define AppVersion Copy(FileVersion, 1, RPos(".", FileVersion) - 1)
 
 [Setup]
 AppId={{C2EC2A29-C318-4512-8F26-5906B3AA7A52}
