@@ -8,6 +8,7 @@ using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using AvaloniaEdit;
 using EelDitor.App.Documents;
 using EelDitor.App.Editor;
 using EelDitor.App.Services;
@@ -221,6 +222,98 @@ public class HtmlPreviewTests
         double bottom = scrollable.Extent.Height - scrollable.Viewport.Height;
         Assert.InRange(tv.VerticalOffset, bottom - 1, bottom + 1);
         Assert.InRange(preview.VerticalOffset, preview.ScrollRange - 1, preview.ScrollRange);
+        w.Close();
+    }
+
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DiffScroll_TracksMatchingLinesAndBothEnds_WithOrWithoutHtmlPreview(bool withPreview)
+    {
+        var lines = Enumerable.Range(1, 160).Select(i => $"## Sekcja {i}\n\nTreść sekcji {i}.\n\n").ToList();
+        string before = string.Concat(lines);
+        lines.InsertRange(19, Enumerable.Range(1, 12).Select(i => $"# Wstawiony {i}\n\n"));
+        lines.RemoveRange(105, 11);
+        string after = string.Concat(lines).TrimEnd();
+        var (w, doc) = Open("compare.md", after);
+        w.OpenDiff("HEAD", before, "working", doc.Document, true, doc.FilePath);
+        if (withPreview) w.RunCommand("view.preview");
+        Settle();
+        var view = w.CurrentDiffView!;
+        var left = view.LeftEditor;
+        var right = view.RightEditor;
+        var preview = w.Preview!;
+
+        void Settle()
+        {
+            w.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            w.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+        }
+        static double End(TextEditor pane)
+        {
+            var scroll = (ILogicalScrollable)pane.TextArea.TextView;
+            return scroll.Extent.Height - scroll.Viewport.Height;
+        }
+        static int Line(TextEditor pane, int section) =>
+            pane.Document.GetLineByOffset(pane.Document.Text.IndexOf($"## Sekcja {section}\n", StringComparison.Ordinal)).LineNumber;
+        static void Near(double actual, double expected) => Assert.InRange(actual, expected - 1, expected + 1);
+        static double Top(TextEditor pane, int line) => pane.TextArea.TextView.GetVisualTopByDocumentLine(line);
+        static double Offset(TextEditor pane) => pane.TextArea.TextView.VerticalOffset;
+        void Move(TextEditor pane, double y)
+        {
+            pane.SetVerticalOffset(y);
+            Settle();
+        }
+        void AtSection(int section)
+        {
+            Near(Offset(left), Top(left, Line(left, section)));
+            Near(Offset(right), Top(right, Line(right, section)));
+            if (withPreview) Near(preview.VerticalOffset, preview.OffsetOfSourceLine(Line(right, section))!.Value);
+        }
+
+        Move(left, Top(left, Line(left, 45)));
+        AtSection(45);
+        Move(right, Top(right, Line(right, 115)));
+        AtSection(115);
+        if (withPreview)
+        {
+            preview.VerticalOffset = preview.OffsetOfSourceLine(Line(right, 73))!.Value;
+            Settle();
+            AtSection(73);
+        }
+
+        view.SyncScroll = false;
+        double independentRight = Offset(right);
+        Move(left, Top(left, Line(left, 37)));
+        Near(Offset(right), independentRight);
+        view.SyncScroll = true;
+        Move(left, End(left) + 1000);
+        Near(Offset(left), End(left));
+        Near(Offset(right), End(right));
+        if (withPreview) Near(preview.VerticalOffset, preview.ScrollRange);
+        Move(right, 0);
+        Near(Offset(left), 0);
+        Near(Offset(right), 0);
+        if (withPreview) Near(preview.VerticalOffset, 0);
+
+        view.WordMode = true;
+        Settle();
+        var words = view.WordsEditor;
+        int line = words.Document.GetLineByOffset(view.WordsOffsetOfNewLine(Line(right, 63) - 1)).LineNumber;
+        Move(words, Top(words, line));
+        if (withPreview)
+        {
+            Near(preview.VerticalOffset, preview.OffsetOfSourceLine(Line(right, 63))!.Value);
+            preview.VerticalOffset = preview.ScrollRange;
+            Settle();
+            Near(Offset(words), End(words));
+        }
+        Move(words, End(words) + 1000);
+        Near(Offset(words), End(words));
+        foreach (var pane in new[] { left, right, words })
+            Assert.False(pane.Options.AllowScrollBelowDocument);
         w.Close();
     }
 

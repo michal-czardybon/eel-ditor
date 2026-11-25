@@ -22,6 +22,8 @@ public partial class MainWindow
     private bool _previewHasContent, _syncingPreviewScroll;
     private double? _previewDrivenEditorOffset;
     private int _previewRenderVersion;
+    private int _previewEndRequest;
+    private bool _aligningPreviewEnd;
 
     // Live updates (see SchedulePreview): a flag rather than a queue, since only the newest text matters.
     private bool _previewDirty, _previewPosted;
@@ -63,6 +65,8 @@ public partial class MainWindow
         if (ReferenceEquals(_previewEditor, editor)) return;
         if (_previewEditor is not null) _previewEditor.TextArea.TextView.ScrollOffsetChanged -= PreviewEditorScrolled;
         _previewEditor = editor;
+        _aligningPreviewEnd = false;
+        _previewEndRequest++;
         _previewDrivenEditorOffset = null;
         editor.TextArea.TextView.ScrollOffsetChanged += PreviewEditorScrolled;
         Dispatcher.UIThread.Post(SyncPreviewFromEditor, DispatcherPriority.Background);
@@ -77,7 +81,8 @@ public partial class MainWindow
     private double SourceLineAtEditorOffset(double offset)
     {
         var tv = _previewEditor!.TextArea.TextView;
-        var line = tv.GetDocumentLineByVisualTop(offset);
+        // At a line boundary the height tree can return the previous line due to rounding.
+        var line = tv.GetDocumentLineByVisualTop(offset + 0.01);
         if (line is null) return 1;
         if (_diffView is { WordMode: true } diff) return diff.NewLineOfWordsOffset(line.Offset) + 1;
         double top = tv.GetVisualTopByDocumentLine(line.LineNumber);
@@ -102,6 +107,7 @@ public partial class MainWindow
 
     private void PreviewEditorScrolled(object? sender, EventArgs e)
     {
+        if (_aligningPreviewEnd) return;
         if (_previewDrivenEditorOffset is double expected)
         {
             _previewDrivenEditorOffset = null;
@@ -112,7 +118,8 @@ public partial class MainWindow
 
     private void SyncPreviewFromEditor()
     {
-        if (!PreviewVisible || !_previewHasContent || _syncingPreviewScroll || _previewEditor is null || _preview is null) return;
+        if (!PreviewVisible || !_previewHasContent || _syncingPreviewScroll || _aligningPreviewEnd
+            || _previewEditor is null || _preview is null) return;
         double range = PreviewEditorScrollRange();
         if (range <= 0 || _preview.ScrollRange <= 0) return;
         double editorOffset = _previewEditor.TextArea.TextView.VerticalOffset;
@@ -129,15 +136,47 @@ public partial class MainWindow
         double range = PreviewEditorScrollRange();
         if (range <= 0 || _preview.ScrollRange <= 0) return;
         double previewOffset = _preview.VerticalOffset;
-        double offset = previewOffset < 0.5 ? 0 : previewOffset >= _preview.ScrollRange - 0.5 ? range
+        bool atEnd = previewOffset >= _preview.ScrollRange - 0.5;
+        int endRequest = ++_previewEndRequest;
+        _aligningPreviewEnd = atEnd;
+        double offset = previewOffset < 0.5 ? 0 : atEnd ? range
             : _preview.SourceLineAtOffset(previewOffset) is double line ? EditorOffsetOfSourceLine(line)
             : previewOffset / _preview.ScrollRange * range;
         offset = Math.Clamp(offset, 0, range);
-        if (Math.Abs(_previewEditor.TextArea.TextView.VerticalOffset - offset) < 0.5) return;
+        if (Math.Abs(_previewEditor.TextArea.TextView.VerticalOffset - offset) >= 0.5)
+            ScrollEditorFromPreview(_previewEditor, offset);
+        if (atEnd) FollowEditorEndAfterLayout(_previewEditor, endRequest, remaining: 3);
+    }
+
+    private void ScrollEditorFromPreview(TextEditor editor, double offset)
+    {
         _previewDrivenEditorOffset = offset;
         _syncingPreviewScroll = true;
-        try { _previewEditor.SetVerticalOffset(offset); }
+        try { editor.SetVerticalOffset(offset); }
         finally { _syncingPreviewScroll = false; }
+    }
+
+    private void FollowEditorEndAfterLayout(TextEditor editor, int request, int remaining)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (request != _previewEndRequest) return;
+            if (!PreviewVisible || !_previewHasContent || !ReferenceEquals(editor, _previewEditor) || _preview is null
+                || _preview.VerticalOffset < _preview.ScrollRange - 0.5)
+            {
+                _aligningPreviewEnd = false;
+                return;
+            }
+            double end = PreviewEditorScrollRange();
+            if (remaining == 0 || Math.Abs(editor.TextArea.TextView.VerticalOffset - end) < 0.5)
+            {
+                _aligningPreviewEnd = false;
+                return;
+            }
+            // A wrapped line can change the extent when it first comes into view.
+            ScrollEditorFromPreview(editor, end);
+            FollowEditorEndAfterLayout(editor, request, remaining - 1);
+        }, DispatcherPriority.Background);
     }
 
     private void SetPreviewVisible(bool visible)
