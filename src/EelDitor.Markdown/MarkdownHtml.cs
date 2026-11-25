@@ -67,14 +67,14 @@ public static partial class MarkdownHtml
         """;
 
     /// <summary>The HTML of a Markdown text (without the page around it).</summary>
-    public static string Body(string markdown)
+    public static string Body(string markdown, bool trackSourceLines = false)
     {
         var source = new StringLineSource(markdown);
         var model = MarkdownDocument.Parse(source);
         var lines = Enumerable.Range(0, source.LineCount).Select(source.GetLine).ToArray();
         var footnotes = new List<(string Label, string Html)>();
         var sb = new StringBuilder();
-        Blocks(lines, model, sb, footnotes);
+        Blocks(lines, model, sb, footnotes, trackSourceLines ? 1 : null);
         if (footnotes.Count > 0)
         {
             sb.Append("<section class=\"footnotes\"><ol>\n");
@@ -85,7 +85,10 @@ public static partial class MarkdownHtml
         return sb.ToString();
     }
 
-    private static void Blocks(string[] lines, MarkdownDocument model, StringBuilder sb, List<(string, string)> footnotes)
+    private static string SourceLine(int? line) => line is int n ? $" data-source-line=\"{n}\"" : "";
+
+    private static void Blocks(string[] lines, MarkdownDocument model, StringBuilder sb, List<(string, string)> footnotes,
+        int? firstSourceLine = null)
     {
         int i = 0;
         while (i < lines.Length)
@@ -97,7 +100,8 @@ public static partial class MarkdownHtml
             if (r.Kind == MdLineKind.FenceDelimiter)
             {
                 string lang = line.Trim().TrimStart('`', '~').Trim();
-                sb.Append("<pre><code").Append(lang.Length > 0 ? $" class=\"language-{Attr(lang.Split(' ')[0])}\"" : "").Append('>');
+                sb.Append("<pre").Append(SourceLine(firstSourceLine + i)).Append("><code")
+                    .Append(lang.Length > 0 ? $" class=\"language-{Attr(lang.Split(' ')[0])}\"" : "").Append('>');
                 i++;
                 while (i < lines.Length && model.GetLine(i).Kind == MdLineKind.Code) sb.Append(WebUtility.HtmlEncode(lines[i++])).Append('\n');
                 if (i < lines.Length && model.GetLine(i).Kind == MdLineKind.FenceDelimiter) i++;
@@ -107,19 +111,21 @@ public static partial class MarkdownHtml
             if (r.TableIndex >= 0)
             {
                 var table = model.Tables[r.TableIndex];
-                Table(lines, model, table, sb);
+                Table(lines, model, table, sb, firstSourceLine);
                 i = table.LastLine + 1;
                 continue;
             }
             if (r.Kind == MdLineKind.Heading)
             {
-                sb.Append("<h").Append(r.HeadingLevel).Append('>').Append(Inline(line, r, 0, line.Length, MdStyle.Bold)).Append("</h").Append(r.HeadingLevel).Append(">\n");
+                sb.Append("<h").Append(r.HeadingLevel).Append(SourceLine(firstSourceLine + i)).Append('>')
+                    .Append(Inline(line, r, 0, line.Length, MdStyle.Bold)).Append("</h").Append(r.HeadingLevel).Append(">\n");
                 i++;
                 continue;
             }
-            if (RuleRegex().IsMatch(line)) { sb.Append("<hr>\n"); i++; continue; }
+            if (RuleRegex().IsMatch(line)) { sb.Append("<hr").Append(SourceLine(firstSourceLine + i)).Append(">\n"); i++; continue; }
             if (QuoteRegex().IsMatch(line))
             {
+                int? quoteStart = firstSourceLine + i;
                 var inner = new List<string>();
                 while (i < lines.Length && lines[i].Trim().Length > 0)
                 {
@@ -130,8 +136,8 @@ public static partial class MarkdownHtml
                     i++;
                 }
                 var quoted = inner.ToArray();
-                sb.Append("<blockquote>\n");
-                Blocks(quoted, MarkdownDocument.Parse(string.Join("\n", quoted)), sb, footnotes);
+                sb.Append("<blockquote").Append(SourceLine(quoteStart)).Append(">\n");
+                Blocks(quoted, MarkdownDocument.Parse(string.Join("\n", quoted)), sb, footnotes, quoteStart);
                 sb.Append("</blockquote>\n");
                 continue;
             }
@@ -144,12 +150,12 @@ public static partial class MarkdownHtml
             }
             if (ListItemRegex().IsMatch(line))
             {
-                i = List(lines, model, i, sb, footnotes);
+                i = List(lines, model, i, sb, footnotes, firstSourceLine);
                 continue;
             }
 
             // A paragraph: lines up to a blank line or the start of another block.
-            sb.Append("<p>");
+            sb.Append("<p").Append(SourceLine(firstSourceLine + i)).Append('>');
             bool first = true;
             while (i < lines.Length && lines[i].Trim().Length > 0)
             {
@@ -178,12 +184,13 @@ public static partial class MarkdownHtml
         public required int Indent;
         public required bool Ordered;
         public string? Start;
+        public int? SourceLine;
         public List<string> Lines { get; } = [];
         public List<Item> Children { get; } = [];
     }
 
     /// <summary>A list (with nested lists, by indentation) starting at line <paramref name="i"/>; returns the line after it.</summary>
-    private static int List(string[] lines, MarkdownDocument model, int i, StringBuilder sb, List<(string, string)> footnotes)
+    private static int List(string[] lines, MarkdownDocument model, int i, StringBuilder sb, List<(string, string)> footnotes, int? firstSourceLine)
     {
         var roots = new List<Item>();
         var stack = new List<Item>();
@@ -196,7 +203,12 @@ public static partial class MarkdownHtml
             int indent = line.Length - line.TrimStart().Length;
             if (m.Success && !RuleRegex().IsMatch(line))
             {
-                var item = new Item { Indent = indent, Ordered = char.IsDigit(m.Groups[2].Value[0]), Start = char.IsDigit(m.Groups[2].Value[0]) ? m.Groups[2].Value[..^1] : null };
+                var item = new Item
+                {
+                    Indent = indent, Ordered = char.IsDigit(m.Groups[2].Value[0]),
+                    Start = char.IsDigit(m.Groups[2].Value[0]) ? m.Groups[2].Value[..^1] : null,
+                    SourceLine = firstSourceLine + i,
+                };
                 item.Lines.Add(line[m.Length..]);
                 while (stack.Count > 0 && stack[^1].Indent >= indent) stack.RemoveAt(stack.Count - 1);
                 if (stack.Count == 0) roots.Add(item); else stack[^1].Children.Add(item);
@@ -233,7 +245,8 @@ public static partial class MarkdownHtml
                 bool task = text.Length >= 3 && text[0] == '[' && text[2] == ']' && text[1] is ' ' or 'x' or 'X' && (text.Length == 3 || char.IsWhiteSpace(text[3]));
                 bool done = task && text[1] != ' ';
                 if (task) text = text[3..].TrimStart();
-                sb.Append(task ? done ? "<li class=\"task done\"><span class=\"box\">☑</span>" : "<li class=\"task\"><span class=\"box\">☐</span>" : "<li>");
+                sb.Append("<li").Append(SourceLine(item.SourceLine));
+                sb.Append(task ? done ? " class=\"task done\"><span class=\"box\">☑</span>" : " class=\"task\"><span class=\"box\">☐</span>" : ">");
                 // The item's text: inline content of its lines (a nested block such as a table is rendered as blocks).
                 var inner = text.Split('\n');
                 var innerModel = MarkdownDocument.Parse(text);
@@ -254,7 +267,7 @@ public static partial class MarkdownHtml
         }
     }
 
-    private static void Table(string[] lines, MarkdownDocument model, MarkdownTable table, StringBuilder sb)
+    private static void Table(string[] lines, MarkdownDocument model, MarkdownTable table, StringBuilder sb, int? firstSourceLine)
     {
         sb.Append("<table>\n");
         foreach (var row in table.Rows)
@@ -263,7 +276,7 @@ public static partial class MarkdownHtml
             bool header = row.Kind == MdLineKind.TableHeader;
             if (header) sb.Append("<thead>");
             else if (row.LineIndex == table.FirstLine + 2) sb.Append("<tbody>\n");
-            sb.Append("<tr>");
+            sb.Append("<tr").Append(SourceLine(firstSourceLine + row.LineIndex)).Append('>');
             string line = lines[row.LineIndex];
             var r = model.GetLine(row.LineIndex);
             for (int c = 0; c < table.ColumnCount; c++)

@@ -120,6 +120,7 @@
       <StreamGeometry x:Key="IconReplace">M3 4h8v2H3zm0 4h5v2H3zm11-4 4 4-4 4V9h-3V7h3zm-4 9h8v2h-8zm0 4h11v2H10zM7 13l-4 4 4 4v-3h3v-2H7z</StreamGeometry>
       <StreamGeometry x:Key="IconWrap">M4 6h16v2H4zm0 12h6v2H4zm0-6h13.5a3.5 3.5 0 0 1 0 7H15v2l-3-3 3-3v2h2.5a1.5 1.5 0 0 0 0-3H4z</StreamGeometry>
       <StreamGeometry x:Key="IconWhitespace">M10 3h9v2h-2v16h-2V5h-2v16h-2v-9a4.5 4.5 0 0 1 0-9z</StreamGeometry>
+      <StreamGeometry x:Key="IconHtmlPreview">M2 4h20v16H2zM4 8v10h16V8zM10 10l-3 3 3 3 1.25-1.25L9.5 13l1.75-1.75zM14 10l-1.25 1.25L14.5 13l-1.75 1.75L14 16l3-3z</StreamGeometry>
       <StreamGeometry x:Key="IconMarkdown">M2 6h20v12H2zm2 2v8h2.5v-4.5L8.5 14l2-2.5V16H13V8h-2.5l-2 2.5-2-2.5zm12 0v4h-2l3.5 4 3.5-4h-2V8z</StreamGeometry>
       <StreamGeometry x:Key="IconDiff">M11 3h2v18h-2zM3 5h6v2H3zm0 4h6v2H3zm0 4h6v2H3zm12-8h6v2h-6zm0 4h6v2h-6zm0 4h4v2h-4zm0 4h6v2h-6z</StreamGeometry>
       <StreamGeometry x:Key="IconHistory">M13 3a9 9 0 0 0-9 9H1l4 4 4-4H6a7 7 0 1 1 2 4.9l-1.4 1.4A9 9 0 1 0 13 3zm-1 5v5l4.3 2.5.7-1.2-3.5-2.1V8z</StreamGeometry>

@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
@@ -154,6 +155,95 @@ public class HtmlPreviewTests
 
         w.RunCommand("view.preview");
         Assert.False(w.PreviewVisible);
+    }
+
+    [AvaloniaFact]
+    public void Preview_FollowsTheRightDiffSnapshotAndItsDirectory()
+    {
+        var (w, _) = Open("active.md", "# Aktywny plik\n");
+        string dir = TestDirs.New();
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(Path.Combine(dir, "a.png"), Convert.FromBase64String(MarkdownWidgetTests.OnePixelPng));
+        w.RunCommand("view.preview");
+        w.OpenDiff("HEAD", "# Wersja przed\n", "working",
+            DiffView.ReadOnlyDocument("# Wersja po\n\n![obraz](a.png)\n"), false, Path.Combine(dir, "snapshot.md"));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Contains(Blocks(w.Preview!.Content), b => Text(b) == "Wersja po");
+        Assert.DoesNotContain(Blocks(w.Preview.Content), b => Text(b) == "Aktywny plik");
+        Assert.Single(w.Preview.Content.GetVisualDescendants().OfType<Image>());
+
+        w.CurrentDiffView!.WordMode = true;
+        w.CurrentDiffView.RightEditor.Document.Insert(0, "# Zmieniona\n\n");
+        for (int i = 0; i < 100 && !Blocks(w.Preview.Content).Any(b => Text(b) == "Zmieniona"); i++)
+        {
+            Thread.Sleep(10);
+            Dispatcher.UIThread.RunJobs();
+        }
+        Assert.Contains(Blocks(w.Preview.Content), b => Text(b) == "Zmieniona");
+        Assert.DoesNotContain(Blocks(w.Preview.Content), b => Text(b) == "Wersja przed");
+        w.CloseDiff();
+        w.UpdatePreviewNow();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Contains(Blocks(w.Preview.Content), b => Text(b) == "Aktywny plik");
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public void Preview_ScrollsToTheSameSourceLineInBothDirections()
+    {
+        string source = string.Concat(Enumerable.Range(1, 100).Select(i =>
+            i <= 40 ? $"# Sekcja {i}\n\n" : $"Sekcja {i}\n\n"));
+        var (w, doc) = Open("long.md", source);
+        w.RunCommand("view.preview");
+        w.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+        var preview = w.Preview!;
+        var tv = w.Editor.TextArea.TextView;
+        double PreviewTop(string text) =>
+            Blocks(preview.Content).Single(block => Text(block) == text).TranslatePoint(default, preview.Content)!.Value.Y
+            + preview.Content.Margin.Top;
+        int Line(string text) => doc.Document.GetLineByOffset(source.IndexOf(text, StringComparison.Ordinal)).LineNumber;
+        double firstOffset = tv.GetVisualTopByDocumentLine(Line("Sekcja 55"));
+        w.Editor.SetVerticalOffset(firstOffset);
+        w.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+        Assert.InRange(preview.VerticalOffset, PreviewTop("Sekcja 55") - 1, PreviewTop("Sekcja 55") + 1);
+
+        preview.VerticalOffset = PreviewTop("Sekcja 28");
+        w.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+        Assert.InRange(tv.VerticalOffset, tv.GetVisualTopByDocumentLine(Line("Sekcja 28")) - 1,
+            tv.GetVisualTopByDocumentLine(Line("Sekcja 28")) + 1);
+        var scrollable = (ILogicalScrollable)tv;
+        preview.VerticalOffset = preview.ScrollRange;
+        w.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+        double bottom = scrollable.Extent.Height - scrollable.Viewport.Height;
+        Assert.InRange(tv.VerticalOffset, bottom - 1, bottom + 1);
+        Assert.InRange(preview.VerticalOffset, preview.ScrollRange - 1, preview.ScrollRange);
+        w.Close();
+    }
+
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MarkdownEditor_ScrollsToTheLastLineAndNoFurther(bool withPreview)
+    {
+        var (w, _) = Open("long.md", string.Join("\n\n", Enumerable.Repeat("Wiersz.", 150)));
+        if (withPreview) w.RunCommand("view.preview");
+        w.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+        var tv = w.Editor.TextArea.TextView;
+        var scroll = (ILogicalScrollable)tv;
+        double bottom = tv.DocumentHeight - scroll.Viewport.Height;
+        Assert.True(bottom > 0);
+        Assert.Equal(tv.DocumentHeight, scroll.Extent.Height, 2);
+        w.Editor.SetVerticalOffset(bottom + scroll.Viewport.Height);
+        w.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+        Assert.InRange(tv.VerticalOffset, bottom - 1, bottom + 1);
+        if (withPreview) Assert.Equal(w.Preview!.ScrollRange, w.Preview.VerticalOffset, 2);
+        w.Close();
     }
 
     [AvaloniaFact]

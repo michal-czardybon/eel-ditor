@@ -1606,6 +1606,8 @@ internal sealed class TableRowRun(TextRunProperties properties, double charWidth
 /// </summary>
 internal sealed class CurrentCellRenderer(MarkdownView view, TextView textView) : Control
 {
+    private (Typeface Face, double Size, double Height, double Offset)? _separatorStroke;
+
     public CurrentCellRenderer Attach()
     {
         IsHitTestVisible = false;
@@ -1624,6 +1626,26 @@ internal sealed class CurrentCellRenderer(MarkdownView view, TextView textView) 
 
     private void Redraw(object? sender, EventArgs e) => InvalidateVisual();
 
+    private double LowerSeparatorStroke(TableRowElement row, double lineHeight)
+    {
+        var face = row.TextRunProperties.Typeface;
+        double size = row.TextRunProperties.FontRenderingEmSize;
+        if (_separatorStroke is { } cached && cached.Face == face && cached.Size == size && cached.Height == lineHeight)
+            return cached.Offset;
+
+        FormattedText Measure(string glyph) => new(glyph, System.Globalization.CultureInfo.CurrentCulture,
+            FlowDirection.LeftToRight, face, size, null);
+        var equals = Measure("=");
+        double dashHeight = Measure("-").Extent;
+        // Use the bottom of the glyph's ink and the font's horizontal stroke thickness.
+        // The text run centres the glyph's line box inside the grid line.
+        double offset = equals.Extent > dashHeight && dashHeight > 0
+            ? Math.Clamp((lineHeight + equals.Height) / 2 + equals.OverhangAfter - dashHeight / 2, 0, lineHeight)
+            : lineHeight * 0.65;
+        _separatorStroke = (face, size, lineHeight, offset);
+        return offset;
+    }
+
     public override void Render(DrawingContext drawingContext)
     {
         if (!textView.VisualLinesValid) return;
@@ -1639,9 +1661,14 @@ internal sealed class CurrentCellRenderer(MarkdownView view, TextView textView) 
             int firstText = el.Lines.FindIndex(l => l.Cells is not null), lastText = el.Lines.FindLastIndex(l => l.Cells is not null);
             // The +---+ lines around the text: this row's own, or the neighbouring row's (measured where it really is,
             // so the frames of neighbouring rows meet on the same line).
-            double top = firstText > 0 ? Middle(visual!, firstText - 1)
-                : textView.GetVisualLine(line - 1) is { } previous && Row(previous) is { } p ? Middle(previous, p.Lines.Count - 1)
-                : Middle(visual!, firstText) - lh;
+            double top = Middle(visual!, firstText) - lh;
+            if (firstText > 0) top = Middle(visual!, firstText - 1);
+            else if (textView.GetVisualLine(line - 1) is { } previous && Row(previous) is { } p)
+            {
+                top = Middle(previous, p.Lines.Count - 1);
+                if (p.Lines[^1].Text.Contains('='))
+                    top += LowerSeparatorStroke(p, lh) - lh / 2;
+            }
             double bottom = lastText + 1 < el.Lines.Count ? Middle(visual!, lastText + 1)
                 : textView.GetVisualLine(line + 1) is { } next && Row(next) is not null ? Middle(next, 0)
                 : Middle(visual!, lastText) + lh;

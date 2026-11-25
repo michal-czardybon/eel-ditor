@@ -263,6 +263,12 @@ public class TableCellFeedbackTests
         Settle();
         Assert.NotNull(w.CellEditor);                              // the edit goes on
         Assert.Equal("ala ==ma== kota", editor.Text);
+        editor.Select(6, 2);
+        CellKey(w, Key.A, KeyModifiers.Control | KeyModifiers.Shift);
+        Assert.Equal("ala ma kota", editor.Text);
+        editor.Select(4, 2);
+        CellKey(w, Key.A, KeyModifiers.Control | KeyModifiers.Shift);
+        Assert.Equal("ala ==ma== kota", editor.Text);
         CellKey(w, Key.Enter, KeyModifiers.Control);
         Assert.Equal("| x | ala ==ma== kota |", Line(doc, 3));
     }

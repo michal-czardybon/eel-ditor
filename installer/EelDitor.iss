@@ -68,6 +68,7 @@ Name: "contextmenu"; Description: "{cm:TaskContextMenu}"; GroupDescription: "{cm
 Name: "openwith"; Description: "{cm:TaskOpenWith}"; GroupDescription: "{cm:Integration}"
 
 [Files]
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\publish\win-x64\{#GitMenuDll}"; DestDir: "{app}"; Flags: ignoreversion restartreplace uninsrestartdelete; Tasks: contextmenu
 

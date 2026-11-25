@@ -33,6 +33,7 @@ $files = @(
     @("$root/eel-ditor.desktop", 'installer/linux/eel-ditor.desktop', $false, $true),
     @("$root/eel_ditor_git.py", 'installer/linux/eel_ditor_git.py', $false, $true),
     @("$root/README.txt", 'installer/linux/README.txt', $false, $true),
+    @("$root/LICENSE", 'LICENSE', $false, $true),
     @("$root/eel-ditor.png", 'src/EelDitor.App/Assets/app-256.png', $false, $false)
 )
 

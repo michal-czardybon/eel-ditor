@@ -157,7 +157,7 @@ public partial class MainWindow
         Add("md.italic", "Menu.Md.Italic", () => MdStyleToggle("*", MdStyle.Italic), ["Ctrl+I"], () => InMarkdown);
         Add("md.strike", "Menu.Md.Strike", () => MdStyleToggle("~~", MdStyle.Strike), ["Ctrl+Shift+X"], () => InMarkdown);
         Add("md.code", "Menu.Md.Code", () => MdStyleToggle("`", MdStyle.Code), ["Ctrl+OemTilde"], () => InMarkdown);
-        Add("md.highlight", "Menu.Md.Highlight", () => MdStyleToggle("==", MdStyle.Highlight), null, () => InMarkdown, tooltipKey: "Menu.Md.HighlightTip");
+        Add("md.highlight", "Menu.Md.Highlight", () => MdStyleToggle("==", MdStyle.Highlight), ["Ctrl+Shift+A"], () => InMarkdown, tooltipKey: "Menu.Md.HighlightTip");
         Add("md.sub", "Menu.Md.Subscript", () => MdStyleToggle("~", MdStyle.Subscript), null, () => InMarkdown, tooltipKey: "Menu.Md.SubscriptTip");
         Add("md.sup", "Menu.Md.Superscript", () => MdStyleToggle("^", MdStyle.Superscript), null, () => InMarkdown, tooltipKey: "Menu.Md.SuperscriptTip");
         Add("md.task", "Menu.Md.Task", () => { if (_markdown is not null) MarkdownCommands.ToggleTask(Editor, _markdown); }, null, () => InMarkdown, tooltipKey: "Menu.Md.TaskTip");
@@ -351,7 +351,9 @@ public partial class MainWindow
         Add("view.gitPanel", "Menu.View.GitPanel", () => ShowSideTab(GitTab), ["Ctrl+Shift+G", "Ctrl+Alt+G"]);
         Add("view.map", "Menu.View.DocumentMap", () => ShowSideTab(MapTab), ["Ctrl+Shift+J", "Ctrl+Alt+M"]);
         Add("view.preview", "Menu.View.Preview", TogglePreview, ["Ctrl+Shift+V"], isChecked: () => PreviewVisible, tooltipKey: "Menu.View.PreviewTip");
-        Add("help.about", "Menu.Help.About", () => _ = Dialogs.Info(this, AppInfo.Name, Loc.T("About.Text", typeof(App).Assembly.GetName().Version?.ToString(3) ?? "")));
+        Add("help.about", "Menu.Help.About", () => _ = Dialogs.Info(this, AppInfo.Name,
+            Loc.T("About.Text", typeof(App).Assembly.GetName().Version?.ToString(3) ?? "")
+            + "\n\n© Michał Czardybon\nGNU General Public License v3.0"));
 
         _keyMap.ChordStateChanged += chord => StatusMessage.Text = chord is null ? "" : Loc.T("Status.Chord", chord);
     }
@@ -634,6 +636,7 @@ public partial class MainWindow
         S();
         Toggle("view.wrap", "IconWrap");
         Toggle("md.raw", "IconMarkdown", "IconBlueBrush");
+        Toggle("view.preview", "IconHtmlPreview", "IconBlueBrush");
         Toggle("view.allChars", "IconWhitespace");
         BuildParagraphTools(S);
         S();

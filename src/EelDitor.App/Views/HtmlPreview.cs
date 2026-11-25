@@ -22,6 +22,10 @@ public sealed class HtmlPreview : Border
     private readonly ScrollViewer _scroll;
     private readonly StackPanel _content;
     private Dictionary<string, Control> _anchors = new(StringComparer.Ordinal);
+    private IReadOnlyList<(int Line, Control Control)> _sourceBlocks = [];
+    private (double Line, double Offset)[]? _scrollAnchors;
+    private Size _anchorExtent, _anchorViewport;
+    private int _sourceLineCount;
 
     /// <summary>A click on a link that is not an anchor in the page (the address as written).</summary>
     public event Action<string>? LinkActivated;
@@ -39,6 +43,10 @@ public sealed class HtmlPreview : Border
             Content = _content,
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+        };
+        _scroll.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == ScrollViewer.OffsetProperty) ScrollOffsetChanged?.Invoke();
         };
         // A bar with the preview's name and ✕ to close it, like the bar of the current file.
         _close = new Button { Content = "✕", Padding = new Thickness(10, 0), Background = Brushes.Transparent, VerticalAlignment = VerticalAlignment.Stretch };
@@ -65,16 +73,29 @@ public sealed class HtmlPreview : Border
     /// <summary>The controls of the rendered page (tests).</summary>
     internal StackPanel Content => _content;
 
+    internal event Action? ScrollOffsetChanged;
+    internal double ScrollRange => Math.Max(0, _scroll.Extent.Height - _scroll.Viewport.Height);
+    internal double VerticalOffset
+    {
+        get => _scroll.Offset.Y;
+        set => _scroll.Offset = new Vector(_scroll.Offset.X, Math.Clamp(value, 0, ScrollRange));
+    }
+
     /// <summary>Renders <paramref name="html"/>; the scroll position is kept, so a live preview does not jump.</summary>
-    public void Show(string html, string? baseDirectory, EditorPalette palette, double fontSize, FontFamily monoFont)
+    public void Show(string html, string? baseDirectory, EditorPalette palette, double fontSize, FontFamily monoFont,
+        Func<HtmlElement, int?>? sourceLine = null, int sourceLineCount = 0)
     {
         var offset = _scroll.Offset;
         Background = palette.Background;
         _content.Children.Clear();
-        var renderer = new HtmlRenderer(palette, fontSize, monoFont, baseDirectory, Math.Max(200, Bounds.Width - 60), OnLink);
+        var renderer = new HtmlRenderer(palette, fontSize, monoFont, baseDirectory, Math.Max(200, Bounds.Width - 60), OnLink)
+            { SourceLine = sourceLine };
         var doc = HtmlParser.Parse(html);
         renderer.Render(doc.Find("body") ?? doc, _content);
         _anchors = renderer.Anchors;
+        _sourceBlocks = renderer.SourceBlocks;
+        _sourceLineCount = sourceLineCount;
+        _scrollAnchors = null;
         Dispatcher.UIThread.Post(() => _scroll.Offset = offset, DispatcherPriority.Background);
     }
 
@@ -84,7 +105,43 @@ public sealed class HtmlPreview : Border
         Background = palette.Background;
         _content.Children.Clear();
         _anchors.Clear();
+        _sourceBlocks = [];
+        _scrollAnchors = null;
         _content.Children.Add(new TextBlock { Text = message, Foreground = palette.Dim, TextWrapping = TextWrapping.Wrap, FontStyle = FontStyle.Italic });
+    }
+
+    internal double? OffsetOfSourceLine(double line) => Interpolate(line, byLine: true);
+    internal double? SourceLineAtOffset(double offset) => Interpolate(offset, byLine: false);
+
+    private double? Interpolate(double value, bool byLine)
+    {
+        if (_sourceBlocks.Count == 0) return null;
+        if (_scrollAnchors is null || _anchorExtent != _scroll.Extent || _anchorViewport != _scroll.Viewport)
+        {
+            _anchorExtent = _scroll.Extent;
+            _anchorViewport = _scroll.Viewport;
+            var points = new List<(double Line, double Offset)> { (1, 0) };
+            foreach (var group in _sourceBlocks.GroupBy(block => block.Line).OrderBy(group => group.Key))
+            {
+                double y = group.Select(block => block.Control.TranslatePoint(default, _content)?.Y ?? double.PositiveInfinity).Min()
+                    + _content.Margin.Top;
+                if (group.Key > points[^1].Line && y > points[^1].Offset && y < _anchorExtent.Height)
+                    points.Add((group.Key, y));
+            }
+            points.Add((_sourceLineCount + 1, Math.Max(points[^1].Offset + 1, _anchorExtent.Height)));
+            _scrollAnchors = points.ToArray();
+        }
+        double Input(int index) => byLine ? _scrollAnchors[index].Line : _scrollAnchors[index].Offset;
+        double Output(int index) => byLine ? _scrollAnchors[index].Offset : _scrollAnchors[index].Line;
+        int lo = 0, hi = _scrollAnchors.Length - 1;
+        while (hi - lo > 1)
+        {
+            int mid = (hi + lo) / 2;
+            if (Input(mid) <= value) lo = mid;
+            else hi = mid;
+        }
+        double fraction = Math.Clamp((value - Input(lo)) / (Input(hi) - Input(lo)), 0, 1);
+        return Output(lo) + fraction * (Output(hi) - Output(lo));
     }
 
     private void OnLink(string url)
@@ -121,6 +178,13 @@ internal sealed class HtmlRenderer
 
     /// <summary>Elements whose id/name can be the target of "#…" links, and the control drawn for them.</summary>
     public Dictionary<string, Control> Anchors { get; } = new(StringComparer.Ordinal);
+    public Func<HtmlElement, int?>? SourceLine { get; init; }
+    public List<(int Line, Control Control)> SourceBlocks { get; } = [];
+
+    private void RecordSource(HtmlElement element, Control control)
+    {
+        if (SourceLine?.Invoke(element) is int line) SourceBlocks.Add((line, control));
+    }
 
     private static readonly HashSet<string> Skipped = new(StringComparer.Ordinal)
         { "head", "script", "style", "title", "template", "meta", "link", "base", "colgroup", "col", "param", "source", "track", "datalist" };
@@ -286,8 +350,11 @@ internal sealed class HtmlRenderer
         }
         drawn ??= target.Children.Count > before ? target.Children[before] : null;
         if (drawn is not null)
+        {
+            RecordSource(e, drawn);
             foreach (var key in new[] { e.Attr("id"), e.Attr("name") })
                 if (!string.IsNullOrEmpty(key)) Anchors.TryAdd(key, drawn);
+        }
     }
 
     private static TextAlignment Alignment(HtmlElement e)
@@ -337,6 +404,7 @@ internal sealed class HtmlRenderer
             Grid.SetRow(content, row);
             Grid.SetColumn(content, 1);
             grid.Children.Add(content);
+            RecordSource(item, content);
         }
         return grid;
     }
@@ -363,6 +431,7 @@ internal sealed class HtmlRenderer
         {
             grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
             int col = 0;
+            bool firstCell = true;
             foreach (var cell in rows[r].Elements.Where(c => c.Name is "td" or "th"))
             {
                 while (taken.Contains((r, col))) col++;
@@ -383,6 +452,8 @@ internal sealed class HtmlRenderer
                 Grid.SetRowSpan(border, rowSpan);
                 Grid.SetColumnSpan(border, colSpan);
                 grid.Children.Add(border);
+                if (firstCell) RecordSource(rows[r], border);
+                firstCell = false;
                 col += colSpan;
                 columns = Math.Max(columns, col);
             }

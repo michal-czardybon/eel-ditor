@@ -28,6 +28,12 @@ public static class EditorScroll
         else editor.ScrollToHorizontalOffset(x);
     }
 
+    internal static void SetScrollOffset(this TextEditor editor, Vector offset)
+    {
+        if (Viewer(editor) is { } v) v.Offset = offset;
+        else ((ILogicalScrollable)editor.TextArea.TextView).Offset = offset;
+    }
+
     /// <summary>
     /// Keeps the view on the text: when the text gets shorter (a wider window makes table rows and paragraphs wrap
     /// less), the editor's ScrollViewer moves its own offset back to the end, but the text view keeps the old one and
@@ -42,9 +48,10 @@ public static class EditorScroll
         {
             posted = false;
             if (tv.Bounds.Height <= 0 || !tv.VisualLinesValid) return;
-            double last = Math.Max(0, tv.DocumentHeight - tv.Bounds.Height);
-            if (tv.VerticalOffset <= last + 1) return;
+            // The extent includes the intentional space below the last line when that option is on.
             var scrollable = (ILogicalScrollable)tv;
+            double last = Math.Max(0, scrollable.Extent.Height - scrollable.Viewport.Height);
+            if (tv.VerticalOffset <= last + 1) return;
             scrollable.Offset = new Vector(scrollable.Offset.X, last);
             if (Viewer(editor) is { } v && Math.Abs(v.Offset.Y - last) > 0.5) v.Offset = new Vector(v.Offset.X, last);
         }

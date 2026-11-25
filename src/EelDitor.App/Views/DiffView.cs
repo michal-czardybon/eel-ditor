@@ -38,8 +38,7 @@ public sealed partial class DiffView : Grid
     private readonly TextMate.Installation? _leftTm, _rightTm;
     private DiffResult _diff;
     private bool _syncing;
-    private bool? _scrollLeader;      // the side the user is scrolling (true = left)
-    private DateTime _leaderUntil;
+    private Vector? _syncedLeftOffset, _syncedRightOffset;
     private bool _syncScroll = true;
     private bool _closed;
     private bool _leftActive;
@@ -155,6 +154,7 @@ public sealed partial class DiffView : Grid
             if (_syncScroll == value) return;
             _syncScroll = value;
             SyncScrollChanged?.Invoke(value);
+            _syncedLeftOffset = _syncedRightOffset = null;
             if (value) Sync(fromLeft: _leftActive);
         }
     }
@@ -664,26 +664,36 @@ public sealed partial class DiffView : Grid
     private void Sync(bool fromLeft)
     {
         if (_syncing || _closed || !SyncScroll || _left.Document is null || _right.Document is null) return;
-        // The other side scrolls asynchronously and reports it after we return; without this it would
-        // "synchronize" the side being scrolled back to its old position.
-        var now = DateTime.UtcNow;
-        if (_scrollLeader is { } leader && leader != fromLeft && now < _leaderUntil) return;
-        _scrollLeader = fromLeft;
-        _leaderUntil = now.AddMilliseconds(250);
+        var src = fromLeft ? _left : _right;
+        var dst = fromLeft ? _right : _left;
+        var tv = src.TextArea.TextView;
+        var dtv = dst.TextArea.TextView;
+        ref var expected = ref (fromLeft ? ref _syncedLeftOffset : ref _syncedRightOffset);
+        ref var target = ref (fromLeft ? ref _syncedRightOffset : ref _syncedLeftOffset);
+        static bool Near(Vector a, Vector b) => Math.Abs(a.X - b.X) < 0.5 && Math.Abs(a.Y - b.Y) < 0.5;
+        var previous = expected;
+        expected = null;
+        // Ignore the delayed notification of our own scroll, while allowing an immediate change of direction.
+        if (previous is { } offset && Near(offset, tv.ScrollOffset)) return;
         _syncing = true;
         try
         {
-            var src = fromLeft ? _left : _right;
-            var dst = fromLeft ? _right : _left;
-            var tv = src.TextArea.TextView;
-            dst.SetHorizontalOffset(src.HorizontalOffset);
             var topLine = tv.GetDocumentLineByVisualTop(tv.VerticalOffset);
             if (topLine is null) return;
             double within = tv.VerticalOffset - tv.GetVisualTopByDocumentLine(topLine.LineNumber);
             int mapped = fromLeft ? _diff.MapOldToNew(topLine.LineNumber - 1) : _diff.MapNewToOld(topLine.LineNumber - 1);
             mapped = Math.Clamp(mapped + 1, 1, dst.Document.LineCount);
-            var dtv = dst.TextArea.TextView;
-            dst.SetVerticalOffset(dtv.GetVisualTopByDocumentLine(mapped) + within);
+            var sourceScroll = (Avalonia.Controls.Primitives.ILogicalScrollable)tv;
+            var destinationScroll = (Avalonia.Controls.Primitives.ILogicalScrollable)dtv;
+            double sourceEnd = Math.Max(0, sourceScroll.Extent.Height - sourceScroll.Viewport.Height);
+            double destinationEnd = Math.Max(0, destinationScroll.Extent.Height - destinationScroll.Viewport.Height);
+            double y = tv.VerticalOffset < 0.5 ? 0 : tv.VerticalOffset >= sourceEnd - 0.5 ? destinationEnd
+                : Math.Clamp(dtv.GetVisualTopByDocumentLine(mapped) + within, 0, destinationEnd);
+            double x = Math.Clamp(tv.HorizontalOffset, 0, Math.Max(0, destinationScroll.Extent.Width - destinationScroll.Viewport.Width));
+            var desired = new Vector(x, y);
+            if (Near(desired, dtv.ScrollOffset)) return;
+            target = desired;
+            dst.SetScrollOffset(desired);
         }
         finally { _syncing = false; }
     }
@@ -701,6 +711,8 @@ public sealed partial class DiffView : Grid
         e.Options.EnableHyperlinks = false;
         e.Options.EnableRectangularSelection = true;
         e.Options.HighlightCurrentLine = false;
+        e.Options.AllowScrollBelowDocument = false;
+        EditorScroll.KeepOnText(e);
         e.AttachedToVisualTree += (_, _) => MainWindow.ApplyLineNumberFont(e);
         return e;
     }

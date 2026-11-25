@@ -321,7 +321,7 @@ public partial class MainWindow : Window
         o.HighlightCurrentLine = _settings.HighlightCurrentLine;
         o.EnableHyperlinks = false;
         o.EnableEmailHyperlinks = false;
-        o.AllowScrollBelowDocument = true;
+        o.AllowScrollBelowDocument = false;
         // Marks for spaces, tabs and line ends are drawn outside the text layout (AvaloniaEdit's own changed line
         // heights and the width of headings).
         _whitespaceMarks = new EelDitor.App.Editor.WhitespaceMarks(Editor) { Spaces = _settings.ShowSpacesAndTabs, LineEnds = _settings.ShowEndOfLine };
@@ -506,7 +506,9 @@ public partial class MainWindow : Window
     /// Ctrl+click on a Markdown link: web and mail addresses open in the default browser/mail program,
     /// relative or absolute paths open in the editor. Nothing else is executed.
     /// </summary>
-    private async Task OpenLinkAsync(string url, EditorDocument from)
+    private Task OpenLinkAsync(string url, EditorDocument from) => OpenLinkAsync(url, from.DirectoryPath);
+
+    private async Task OpenLinkAsync(string url, string? directory)
     {
         url = url.Trim().Trim('<', '>');
         if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
@@ -520,7 +522,7 @@ public partial class MainWindow : Window
         int hash = path.IndexOf('#');
         if (hash >= 0) path = path[..hash];
         if (path.Length == 0) return; // an anchor in this file
-        if (EelDitor.App.Editor.ImageCache.Resolve(from.DirectoryPath, path) is { } full && File.Exists(full))
+        if (EelDitor.App.Editor.ImageCache.Resolve(directory, path) is { } full && File.Exists(full))
             await OpenFileAsync(full);
         else SetStatusMessage(Loc.T("Link.NotFound", url));
     }

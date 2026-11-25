@@ -73,6 +73,10 @@ Builds `artifacts\linux\EelDitor-<version>-linux-x64.tar.gz` (on Windows or anyw
 
 The installer also adds **Open in Eel-ditor (Git)** to GNOME Files (Nautilus) for Git working-tree roots when the distribution's `nautilus-python` extension loader is installed. Restart Nautilus after installation.
 
+## License
+
+Copyright (C) Michał Czardybon. Eel-ditor is licensed under the GNU General Public License, version 3 only. See [LICENSE](LICENSE).
+
 ## Tests
 
 ```

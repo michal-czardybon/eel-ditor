@@ -28,6 +28,7 @@ fi
 
 mkdir -p "$appdir" "$bindir" "$(dirname "$desktop")" "$(dirname "$icon")"
 cp "$here/eel-ditor" "$appdir/eel-ditor"
+cp "$here/LICENSE" "$appdir/LICENSE"
 chmod 755 "$appdir/eel-ditor"
 ln -sf "$appdir/eel-ditor" "$bindir/eel-ditor"
 cp "$here/eel-ditor.png" "$icon"

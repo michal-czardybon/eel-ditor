@@ -321,6 +321,7 @@ public partial class MainWindow
                 case Key.B when ctrl && !shift: MarkdownCommands.ToggleStyle(editor, cellView, "**", MdStyle.Bold); e.Handled = true; break;
                 case Key.I when ctrl && !shift: MarkdownCommands.ToggleStyle(editor, cellView, "*", MdStyle.Italic); e.Handled = true; break;
                 case Key.X when ctrl && shift: MarkdownCommands.ToggleStyle(editor, cellView, "~~", MdStyle.Strike); e.Handled = true; break;
+                case Key.A when ctrl && shift: MarkdownCommands.ToggleStyle(editor, cellView, "==", MdStyle.Highlight); e.Handled = true; break;
                 case Key.OemTilde when ctrl: MarkdownCommands.ToggleStyle(editor, cellView, "`", MdStyle.Code); e.Handled = true; break;
                 case Key.Left when plain:
                 case Key.Right when plain:

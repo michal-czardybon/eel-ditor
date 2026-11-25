@@ -17,6 +17,7 @@ namespace EelDitor.App.Views;
 public partial class MainWindow
 {
     private DiffView? _diffView;
+    private string? _diffPath;
     private HeadComparison? _headComparison;
     private int _headRefreshVersion;
 
@@ -40,10 +41,12 @@ public partial class MainWindow
         view.SyncScrollChanged += on => { _settings.DiffSyncScroll = on; RefreshCommandStates(); };
         view.WordMode = _settings.DiffWordMode;
         // The word view shows both versions in one text: the panel with the current line of each side is not needed.
-        view.WordModeChanged += on => { _settings.DiffWordMode = on; DiffLineHost.IsVisible = !on; FollowDiffInMap(view); RefreshCommandStates(); };
+        view.WordModeChanged += on => { _settings.DiffWordMode = on; DiffLineHost.IsVisible = !on; FollowDiffInMap(view); FollowPreviewEditor(); RefreshCommandStates(); };
         // The map follows the comparison and marks its changed lines.
         view.CurrentLineChanged += () => _documentMap?.RefreshChanges();
         _diffView = view;
+        _diffPath = path;
+        view.RightEditor.TextChanged += OnPreviewTextChanged;
         UpdateDocumentHeader();
         Editor.IsVisible = false;
         EditorHost.Children.Add(view);
@@ -58,6 +61,8 @@ public partial class MainWindow
         DiffLineHost.IsVisible = !view.WordMode;
         linePanel.Show(view);
         FollowDiffInMap(view);
+        FollowPreviewEditor();
+        SchedulePreview();
         UpdateDiffTools();
         RefreshCommandStates();
     }
@@ -70,8 +75,10 @@ public partial class MainWindow
         if (_diffView is null) return;
         int caret = _diffView.RightEditor.CaretOffset;
         bool sameDoc = ReferenceEquals(_diffView.RightEditor.Document, Editor.Document);
+        _diffView.RightEditor.TextChanged -= OnPreviewTextChanged;
         EditorHost.Children.Remove(_diffView);
         _diffView = null;
+        _diffPath = null;
         _headComparison = null;
         _documentMap?.Follow(null);
         UpdateDocumentHeader();
@@ -83,6 +90,8 @@ public partial class MainWindow
         if (sameDoc) Editor.CaretOffset = Math.Min(caret, Editor.Document.TextLength);
         Editor.TextArea.Caret.BringCaretToView();
         Editor.Focus();
+        FollowPreviewEditor();
+        SchedulePreview();
         RefreshCommandStates();
     }
 

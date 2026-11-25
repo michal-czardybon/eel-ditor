@@ -20,6 +20,7 @@ public sealed class HtmlText(string text) : HtmlNode
 /// <summary>An element: lower-case name, attributes (lower-case names, decoded values), children.</summary>
 public sealed class HtmlElement(string name) : HtmlNode
 {
+    public int SourceOffset { get; init; }
     public string Name { get; } = name;
     public Dictionary<string, string> Attributes { get; } = new(StringComparer.OrdinalIgnoreCase);
     public List<HtmlNode> Children { get; } = [];
@@ -169,7 +170,7 @@ public static class HtmlParser
             int p = i + 1;
             while (p < len && IsNameChar(html[p])) p++;
             string tag = html[(i + 1)..p].ToLowerInvariant();
-            var element = new HtmlElement(tag);
+            var element = new HtmlElement(tag) { SourceOffset = i };
             bool selfClosing = false;
             while (p < len)
             {

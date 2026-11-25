@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Avalonia;
+using Avalonia.Controls.Primitives;
 using Avalonia.Threading;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
@@ -79,6 +80,10 @@ internal sealed class LineHeightPrimer
         var top = tv.GetDocumentLineByVisualTop(tv.VerticalOffset);
         double topBefore = top is null ? 0 : tv.GetVisualTopByDocumentLine(top.LineNumber);
         double within = tv.VerticalOffset - topBefore;
+        var scroll = (ILogicalScrollable)tv;
+        double lastOffset = scroll.Extent.Height - scroll.Viewport.Height;
+        bool atEnd = lastOffset > 0 && tv.VerticalOffset >= lastOffset - 1;
+        double heightBefore = tv.DocumentHeight;
 
         var sw = Stopwatch.StartNew();
         while (_queue.Count > 0 && sw.ElapsedMilliseconds < StepMilliseconds)
@@ -95,7 +100,13 @@ internal sealed class LineHeightPrimer
             else _queue[0] = (n, to);
         }
 
-        if (top is not null && !top.IsDeleted && Math.Abs(tv.GetVisualTopByDocumentLine(top.LineNumber) - topBefore) > 0.01)
+        if (atEnd && Math.Abs(tv.DocumentHeight - heightBefore) > 0.01)
+        {
+            tv.InvalidateMeasure();
+            _editor.UpdateLayout();
+            _editor.SetVerticalOffset(scroll.Extent.Height - scroll.Viewport.Height);
+        }
+        else if (top is not null && !top.IsDeleted && Math.Abs(tv.GetVisualTopByDocumentLine(top.LineNumber) - topBefore) > 0.01)
         {
             // Lines above the view changed height: scroll by as much, so the text in view does not move.
             tv.InvalidateMeasure();

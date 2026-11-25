@@ -121,7 +121,10 @@ public sealed partial class EditorDocument : ObservableObject
 
     public bool IsMarkdown => SyntaxOverride is { } o
         ? o == MarkdownSyntax
-        : SyntaxPath is not { } path || Path.GetExtension(path).ToLowerInvariant() is ".md" or ".markdown" or ".mdown" or ".mkd";
+        : SyntaxPath is not { } path || IsMarkdownPath(path);
+
+    internal static bool IsMarkdownPath(string? path) =>
+        Path.GetExtension(path)?.ToLowerInvariant() is ".md" or ".markdown" or ".mdown" or ".mkd";
 
     // View state restored when the document is shown again.
     public int CaretOffset { get; set; }
