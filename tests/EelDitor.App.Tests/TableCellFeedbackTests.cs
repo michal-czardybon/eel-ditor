@@ -65,6 +65,29 @@ public class TableCellFeedbackTests
     }
 
     [AvaloniaFact]
+    public void EnterAtEndOfLastCell_ExtendsTheGridRowBeforeMoreTextIsTyped()
+    {
+        var (w, doc) = Open("| A | B |\n|---|---|\n| x | hello |\n\nBelow the table\n");
+        w.EditTableCell(3, 1, 5);
+        Settle();
+        var grid = w.Editor.TextArea.TextView;
+        grid.EnsureVisualLines();
+        double initialHeight = grid.GetVisualLine(3)!.Height;
+
+        for (int i = 0; i < 3; i++) CellKey(w, Key.Enter);
+        w.UpdateLayout();
+        grid.EnsureVisualLines();
+
+        Assert.Equal("| x | hello<br><br><br> |", Line(doc, 3));
+        Assert.Equal(4, w.CellEditor!.TextArea.Caret.Line);
+        Assert.Equal(initialHeight + 3 * grid.DefaultLineHeight, grid.GetVisualLine(3)!.Height, 2);
+
+        CellKey(w, Key.Enter, KeyModifiers.Control);
+        w.EditTableCell(3, 1);
+        Assert.Equal(4, w.CellEditor!.Document.LineCount);
+    }
+
+    [AvaloniaFact]
     public void HighlightOverABr_StaysHiddenInTheCellEditor_AndIsWrittenBackAsOneSpan()
     {
         var (w, doc) = Open("| a | b |\n|---|---|\n| x | ==jeden<br>dwa== |\n");

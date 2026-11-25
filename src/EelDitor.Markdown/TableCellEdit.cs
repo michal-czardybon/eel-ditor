@@ -91,8 +91,8 @@ public static partial class TableCellEdit
         var (row, _) = ParseRow(line, headerLine, separatorLine, isHeader);
         if (row is null || cellIndex >= row.Cells.Count) return new Result(null, Problem.CellCount);
         var cell = row.Cells[cellIndex];
-        // A table row is one line: a line break in the cell is written as <br>.
-        string source = EscapeBarePipes(string.Join("<br>", newSource.Replace("\r\n", "\n").Replace('\r', '\n').Trim()
+        // Keep blank lines at either end so the rendered row grows as soon as the user presses Enter.
+        string source = EscapeBarePipes(string.Join("<br>", newSource.Replace("\r\n", "\n").Replace('\r', '\n')
             .Split('\n').Select(part => part.Trim())));
         var problem = Problem.CellCount;
         string safe = EscapeUnmatchedBackticks(source);

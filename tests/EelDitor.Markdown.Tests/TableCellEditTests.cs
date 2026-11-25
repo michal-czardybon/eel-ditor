@@ -22,6 +22,8 @@ public class TableCellEditTests
     [InlineData("| a | x |", 0, "a | b", "| a \\| b | x |")]          // a bare pipe is escaped
     [InlineData("| a | x |", 0, "a \\| b", "| a \\| b | x |")]        // an escaped one stays
     [InlineData("| a | x |", 1, "dwie\nlinie", "| a | dwie<br>linie |")]
+    [InlineData("| a | x |", 1, " \r\n x \r\n ", "| a | <br>x<br> |")]
+    [InlineData("| a | x |", 1, "\n", "| a | <br> |")]
     [InlineData("|  | x |", 0, "nowy", "| nowy | x |")]
     [InlineData("| a | x |", 0, "a`", "| a` | x |")]                 // a lone backtick at the end is plain text
     public void Edits(string line, int cell, string source, string expected) => Assert.Equal(expected, Edit(line, cell, source));
