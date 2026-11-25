@@ -156,7 +156,7 @@
   "Git.Index": "Indeks",
   "Git.MessageRequired": "Napiši opis commita.",
   "Git.MessageWatermark": "Opis commita (Ctrl+Enter: commit)",
-  "Git.NoRepository": "Aktualny fajl ne jest v repozitoriju git",
+  "Git.NoRepository": "Nema repozitorijev Git",
   "Git.NoRepositoryHint": "Izměny sut vidimy dlja fajlov iz repozitorija git.",
   "Git.NoUpstream": "bez upstream",
   "Git.NotAvailable": "Programa git ne jest najdena v PATH.",

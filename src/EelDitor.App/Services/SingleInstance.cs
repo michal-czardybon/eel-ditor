@@ -31,6 +31,7 @@ internal static class SingleInstance
     }
 
     public const string NewWindowSwitch = "--new-window";
+    internal const string GitArgumentPrefix = "--git=";
 
     /// <summary>Sends the files to a running instance. True when it took them (this process should exit).</summary>
     public static bool TryHandOver(string[] args) => TryHandOver(args, PipeName);
@@ -56,8 +57,11 @@ internal static class SingleInstance
             // We were started by the user, so we may bring a window to the front; let the running instance do it.
             if (OperatingSystem.IsWindows() && GetNamedPipeServerProcessId(client.SafePipeHandle.DangerousGetHandle(), out uint pid))
                 AllowSetForegroundWindow(pid);
-            var files = args.Where(a => !a.StartsWith("--", StringComparison.Ordinal)).Select(Path.GetFullPath);
-            byte[] message = Encoding.UTF8.GetBytes(string.Join('\n', files) + "\n\n");
+            var targets = args.Select(arg => arg.Length > GitArgumentPrefix.Length && arg.StartsWith(GitArgumentPrefix, StringComparison.Ordinal)
+                ? GitArgumentPrefix + Path.GetFullPath(arg[GitArgumentPrefix.Length..])
+                : arg.StartsWith("--", StringComparison.Ordinal) ? null : Path.GetFullPath(arg))
+                .Where(arg => arg is not null);
+            byte[] message = Encoding.UTF8.GetBytes(string.Join('\n', targets) + "\n\n");
             client.Write(message);
             client.Flush();
             // Wait for the acknowledgement, so the files are not lost if the other instance is closing.

@@ -156,7 +156,7 @@
   "Git.Index": "Index",
   "Git.MessageRequired": "Enter a commit message.",
   "Git.MessageWatermark": "Commit message (Ctrl+Enter to commit)",
-  "Git.NoRepository": "The current file is not in a git repository",
+  "Git.NoRepository": "No Git repositories",
   "Git.NoRepositoryHint": "Open a file from a git repository to see its changes.",
   "Git.NoUpstream": "no upstream",
   "Git.NotAvailable": "git was not found in PATH.",

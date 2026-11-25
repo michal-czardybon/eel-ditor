@@ -39,8 +39,16 @@ public sealed record GitRow(GitEntry Entry, bool Staged)
 /// </summary>
 public sealed class GitPanel : DockPanel
 {
-    // Shortened by whole leading folders ("…\src\Project"), like the folders of the open files.
-    private readonly PathTextBlock _repo = new() { FontWeight = FontWeight.SemiBold, FontSize = 13 };
+    private readonly ComboBox _repositories = new()
+    {
+        Name = "GitRepositories", PlaceholderText = Loc.T("Git.NoRepository"),
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+    };
+    private IReadOnlyList<string> _repositoryRoots = [];
+    private readonly Dictionary<string, string> _commitMessages = new();
+    private string? _selectedRoot;
+    private GitStatus? _shownStatus;
+    private bool _updatingRepositories;
     private readonly TextBlock _branch = new() { FontSize = 12 };
     private readonly TextBox _message = new()
     {
@@ -64,6 +72,16 @@ public sealed class GitPanel : DockPanel
     {
         _info.Res(TextBlock.ForegroundProperty, "DimTextBrush");
         _branch.Res(TextBlock.ForegroundProperty, "DimTextBrush");
+        _repositories.ItemTemplate = new FuncDataTemplate<string>((path, _) =>
+        {
+            var label = new PathTextBlock { FullPath = path };
+            ToolTip.SetTip(label, path);
+            return label;
+        });
+        _repositories.SelectionChanged += (_, _) =>
+        {
+            if (!_updatingRepositories && _repositories.SelectedItem is string root) RepositorySelected?.Invoke(root);
+        };
 
         var rescan = new Button { Content = Loc.T("Git.Rescan") };
         ToolTip.SetTip(rescan, "F5");
@@ -87,7 +105,7 @@ public sealed class GitPanel : DockPanel
 
         // The repository, then the two sections, each with its own actions as a mini toolbar across the panel.
         var top = new StackPanel { Margin = new Thickness(8, 8, 8, 6), Spacing = 4 };
-        top.Children.Add(_repo);
+        top.Children.Add(_repositories);
         top.Children.Add(_branch);
         SetDock(top, Dock.Top);
         Children.Add(top);
@@ -119,6 +137,7 @@ public sealed class GitPanel : DockPanel
     }
 
     public event Action? RescanRequested;
+    public event Action<string>? RepositorySelected;
     public event Action<string>? CommitRequested;
     public event Action? PushRequested;
     public event Action? PullRequested;
@@ -134,24 +153,44 @@ public sealed class GitPanel : DockPanel
 
     public string? Root { get; private set; }
 
-    /// <summary>Shows the repository state (null = the current file is not in a repository).</summary>
+    public void SetRepositories(IReadOnlyList<string> roots, string? selected)
+    {
+        if (_selectedRoot != selected)
+        {
+            if (_selectedRoot is { } previous) _commitMessages[previous] = CommitMessage;
+            _selectedRoot = selected;
+            CommitMessage = selected is null ? "" : _commitMessages.GetValueOrDefault(selected, "");
+            _info.Text = "";
+        }
+        _updatingRepositories = true;
+        if (!_repositoryRoots.SequenceEqual(roots))
+        {
+            _repositoryRoots = roots;
+            _repositories.ItemsSource = roots;
+        }
+        _repositories.SelectedItem = selected;
+        _repositories.IsEnabled = roots.Count > 0;
+        ToolTip.SetTip(_repositories, selected);
+        _updatingRepositories = false;
+    }
+
+    /// <summary>Shows the status of the selected repository, when available.</summary>
     public void Show(GitStatus? status, string? info = null)
     {
+        if (status is not null && ReferenceEquals(status, _shownStatus) && info is null) return;
+        if (_shownStatus is null && status is not null) _info.Text = "";
+        _shownStatus = status;
         Root = status?.Root;
         _body.IsVisible = status is not null;
         _commit.IsEnabled = status?.Entries.Any(e => e.HasStaged) == true;
         _push.IsEnabled = _pull.IsEnabled = _log.IsEnabled = status is not null;
         if (status is null)
         {
-            _repo.FullPath = Loc.T("Git.NoRepository");
-            ToolTip.SetTip(_repo, null);
             _branch.Text = "";
             _unstaged.ItemsSource = _staged.ItemsSource = null;
             _info.Text = info ?? "";
             return;
         }
-        _repo.FullPath = status.Root;
-        ToolTip.SetTip(_repo, status.Root);
         string tracking = !status.HasUpstream ? Loc.T("Git.NoUpstream")
             : status.Ahead == 0 && status.Behind == 0 ? Loc.T("Git.UpToDate")
             : $"↑{status.Ahead} ↓{status.Behind}";
@@ -166,7 +205,20 @@ public sealed class GitPanel : DockPanel
         if (info is not null) _info.Text = info;
     }
 
-    public void SetInfo(string text) => _info.Text = text;
+    public void SetInfo(string root, string text)
+    {
+        if (_selectedRoot == root) _info.Text = text;
+    }
+
+    public void ClearCommitMessage(string root, string committed)
+    {
+        if (_selectedRoot == root)
+        {
+            if (CommitMessage.Trim() == committed) CommitMessage = "";
+        }
+        else if (_commitMessages.TryGetValue(root, out string? draft) && draft.Trim() == committed)
+            _commitMessages.Remove(root);
+    }
 
     private void UpdateStageButtons()
     {
@@ -189,8 +241,8 @@ public sealed class GitPanel : DockPanel
 
     private void RequestCommit()
     {
-        if (string.IsNullOrWhiteSpace(CommitMessage)) { _message.Focus(); SetInfo(Loc.T("Git.MessageRequired")); return; }
-        if (!_commit.IsEnabled) { SetInfo(Loc.T("Git.NothingStaged")); return; }
+        if (string.IsNullOrWhiteSpace(CommitMessage)) { _message.Focus(); _info.Text = Loc.T("Git.MessageRequired"); return; }
+        if (!_commit.IsEnabled) { _info.Text = Loc.T("Git.NothingStaged"); return; }
         CommitRequested?.Invoke(CommitMessage.Trim());
     }
 

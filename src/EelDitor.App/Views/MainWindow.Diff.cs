@@ -107,7 +107,7 @@ public partial class MainWindow
     private async Task RefreshHeadDiffAsync(string root)
     {
         if (_diffView is not { } view || _headComparison is not { } comparison
-            || !string.Equals(comparison.Root, root, StringComparison.OrdinalIgnoreCase)) return;
+            || !RepositoryComparer.Equals(comparison.Root, root)) return;
         int version = ++_headRefreshVersion;
         var head = await GitService.ShowAsync(root, "HEAD", comparison.Path);
         if (head is null && comparison.OriginalPath is { } original)
@@ -211,8 +211,8 @@ public partial class MainWindow
 
     // ---------------------------------------------------------------- status in the files panel
 
-    private readonly Dictionary<string, GitStatus> _gitStatus = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, DispatcherTimer> _gitTimers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, GitStatus> _gitStatus = new(RepositoryComparer);
+    private readonly Dictionary<string, DispatcherTimer> _gitTimers = new(RepositoryComparer);
 
     private void RequestGitRefresh(EditorDocument doc)
     {
@@ -224,10 +224,7 @@ public partial class MainWindow
             timer = new DispatcherTimer(TimeSpan.FromMilliseconds(400), DispatcherPriority.Background, async (s, _) =>
             {
                 ((DispatcherTimer)s!).Stop();
-                var status = await GitService.StatusAsync(root);
-                if (status is null) return;
-                _gitStatus[root] = status;
-                ApplyGitStatus();
+                await RefreshGitAsync(root);
             });
             _gitTimers[root] = timer;
         }

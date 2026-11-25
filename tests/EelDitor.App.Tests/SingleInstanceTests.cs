@@ -14,9 +14,11 @@ public class SingleInstanceTests
         Thread.Sleep(200);
 
         string file = Path.Combine(Path.GetTempPath(), "zażółć gęślą.txt");
-        Assert.True(SingleInstance.TryHandOver([file, "--some-switch"], pipe, checkMutex: false));
+        string repository = Path.Combine("test", "repo z Git");
+        string gitTarget = SingleInstance.GitArgumentPrefix + repository;
+        Assert.True(SingleInstance.TryHandOver([file, "--some-switch", gitTarget], pipe, checkMutex: false));
         var files = await received.Task.WaitAsync(TimeSpan.FromSeconds(3));
-        Assert.Equal([Path.GetFullPath(file)], files);
+        Assert.Equal([Path.GetFullPath(file), SingleInstance.GitArgumentPrefix + Path.GetFullPath(repository)], files);
 
         Assert.False(SingleInstance.TryHandOver([file, SingleInstance.NewWindowSwitch], pipe, checkMutex: false));
         stop.Cancel();

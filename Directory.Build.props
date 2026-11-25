@@ -7,7 +7,7 @@
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <Company>Eel-ditor</Company>
     <Product>Eel-ditor</Product>
-    <Version>0.3.1</Version>
+    <Version>0.3.2</Version>
     <!-- Build output next to src, not inside each project: bin\<Project>\Debug\net10.0, obj\<Project>.
          (Not UseArtifactsOutput with the repository as ArtifactsPath: the SDK then excludes the whole tree from
          compilation.) The artifacts-path option of dotnet build/test still redirects everything elsewhere. -->

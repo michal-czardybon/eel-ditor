@@ -1,7 +1,8 @@
 # Builds the Eel-ditor installer: publishes a self-contained single-file exe, signs it, then compiles the Inno Setup
 # script, which signs the uninstaller and the setup program.
 # Output: artifacts\installer\EelDitor-<version>-setup.exe
-# Needs: the .NET SDK and Inno Setup 6. Signing also needs signtool.exe (Windows SDK) and a code-signing certificate.
+# Needs: the .NET SDK, Inno Setup 6, and the Visual Studio x64 C++ build tools with a Windows SDK.
+# Signing also needs signtool.exe and a code-signing certificate.
 #
 # Signing is optional. By default the files are signed when signtool.exe and a certificate are found, otherwise the
 # script says why and builds unsigned files. -Sign makes signing required (it stops before building when it cannot
@@ -70,8 +71,21 @@ dotnet publish src/EelDitor.App -c Release -r win-x64 --self-contained `
     -p:OutputPath="$PSScriptRoot/bin/EelDitor.App/PublishBuild/" -o publish/win-x64
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 
-# The program is signed before Inno Setup packs it, so the installed exe carries the signature too.
-if ($signing) { Invoke-Sign publish\win-x64\EelDitor.exe }
+$vcvars = $null
+if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        $vcvars = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Auxiliary\Build\vcvars64.bat' | Select-Object -First 1
+    }
+    if (-not $vcvars) { throw "Visual Studio x64 C++ build tools with a Windows SDK are required for the Explorer menu." }
+}
+& installer\windows\build-context-menu.cmd $vcvars
+if ($LASTEXITCODE -ne 0) { throw "Building the Explorer menu extension failed." }
+
+if ($signing) {
+    Invoke-Sign publish\win-x64\EelDitor.exe
+    Invoke-Sign publish\win-x64\EelDitorGitMenu.dll
+}
 
 $iscc = @(
     (Get-Command ISCC.exe -ErrorAction SilentlyContinue)?.Source,

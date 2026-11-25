@@ -19,6 +19,20 @@ public partial class MainWindow
     private GitPanel? _gitPanel;
     private GitLogWindow? _gitLog;
     private DocumentMap? _documentMap;
+    private static readonly StringComparison RepositoryComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    private static readonly StringComparer RepositoryComparer = StringComparer.FromComparison(RepositoryComparison);
+    private readonly Dictionary<string, int> _gitScans = new(RepositoryComparer);
+    private int _gitScanVersion;
+    private string? _selectedGitRoot, _launchedGitRoot;
+    private bool _gitOnlyStartup;
+
+    private static string? RequestedGitRoot(IEnumerable<string> targets)
+    {
+        string? target = targets.LastOrDefault(arg => arg.StartsWith(SingleInstance.GitArgumentPrefix, StringComparison.Ordinal));
+        if (target is null) return null;
+        string directory = target[SingleInstance.GitArgumentPrefix.Length..];
+        return Directory.Exists(directory) ? GitService.FindRoot(directory) : null;
+    }
 
     /// <summary>Creates the sidebar tabs' content: the document map under the file tree and the git panel.</summary>
     private void SetupSidebar()
@@ -29,7 +43,12 @@ public partial class MainWindow
         MapHost.Child = _documentMap;
 
         var panel = _gitPanel = new GitPanel();
-        panel.RescanRequested += () => { if (panel.Root is { } r) _ = RefreshGitAsync(r); else UpdateGitPanel(); };
+        panel.RescanRequested += () => UpdateGitPanel(rescan: true);
+        panel.RepositorySelected += root =>
+        {
+            _selectedGitRoot = root;
+            UpdateGitPanel(rescan: true);
+        };
         panel.StageRequested += rows => _ = GitOnRowsAsync(rows, GitService.StageAsync);
         panel.UnstageRequested += rows => _ = GitOnRowsAsync(rows, GitService.UnstageAsync);
         panel.DiscardRequested += rows => _ = DiscardRowsAsync(rows);
@@ -89,29 +108,49 @@ public partial class MainWindow
 
     /// <summary>The cached status of the repository containing <paramref name="path"/> (innermost repository wins).</summary>
     private GitStatus? StatusFor(string path) =>
-        _gitStatus.Values.Where(s => path.StartsWith(s.Root.TrimEnd('\\', '/') + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        _gitStatus.Values.Where(s => path.StartsWith(s.Root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar, RepositoryComparison))
             .OrderByDescending(s => s.Root.Length).FirstOrDefault();
 
     private async Task RefreshGitAsync(string root)
     {
-        var status = await GitService.StatusAsync(root);
+        int version = _gitScans[root] = ++_gitScanVersion;
+        GitStatus? status;
+        try { status = await GitService.StatusAsync(root); }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception) { status = null; }
+        if (_gitScans[root] != version) return;
+        _gitScans[root] = 0;
         if (status is null) _gitStatus.Remove(root);
         else _gitStatus[root] = status;
         ApplyGitStatus();
     }
 
-    /// <summary>Shows the repository of the current file in the git tab.</summary>
+    /// <summary>Follows the active file until a repository is selected explicitly.</summary>
     private void UpdateGitPanel(bool rescan = false)
     {
         if (_gitPanel is null || !ReferenceEquals(SideTabs.SelectedItem, GitTab)) return;
-        string? root = _active?.FilePath is { } p && GitService.KnownAvailable ? GitService.FindRoot(p) : null;
+        string? activeRoot = _active?.FilePath is { } p ? GitService.FindRoot(p) : null;
+        string[] roots = _files.Documents.Where(doc => doc.FilePath is not null).Select(doc => doc.DirectoryPath)
+            .Distinct(RepositoryComparer).Select(GitService.FindRoot)
+            .Append(_launchedGitRoot).OfType<string>().Distinct(RepositoryComparer).Order(RepositoryComparer).ToArray();
+        if (_selectedGitRoot is not null && !roots.Contains(_selectedGitRoot, RepositoryComparer)) _selectedGitRoot = null;
+        string? root = roots.FirstOrDefault(candidate => RepositoryComparer.Equals(candidate, _selectedGitRoot ?? activeRoot))
+            ?? roots.FirstOrDefault();
+        _gitPanel.SetRepositories(roots, root);
         if (root is null)
         {
             _gitPanel.Show(null, GitService.KnownAvailable ? Loc.T("Git.NoRepositoryHint") : Loc.T("Git.NotAvailable"));
             return;
         }
+        if (!GitService.KnownAvailable)
+        {
+            _gitPanel.Show(null, Loc.T("Git.NotAvailable"));
+            return;
+        }
+        bool scanned = _gitScans.TryGetValue(root, out int scan);
         if (_gitStatus.TryGetValue(root, out var status)) _gitPanel.Show(status);
-        if (rescan || status is null) _ = RefreshGitAsync(root);
+        else _gitPanel.Show(null, rescan || !scanned || scan != 0 ? Loc.T("Git.LogLoading") : Loc.T("Git.Failed"));
+        if (rescan || !scanned) _ = RefreshGitAsync(root);
     }
 
     // ---------------------------------------------------------------- operations
@@ -125,26 +164,27 @@ public partial class MainWindow
 
     private async Task DiscardRowsAsync(IReadOnlyList<GitRow> rows)
     {
-        if (rows.Count == 0) return;
+        if (rows.Count == 0 || _gitPanel?.Root is not { } root) return;
         string names = string.Join(Environment.NewLine, rows.Take(10).Select(r => r.Entry.RelativePath)) + (rows.Count > 10 ? Environment.NewLine + "…" : "");
         if (await Dialogs.Ask(this, "git", Loc.T("Git.ConfirmDiscard", names), Loc.T("Git.Discard"), Loc.T("Button.Cancel")) != 0) return;
-        await GitOnRowsAsync(rows, GitService.DiscardAsync);
+        await GitService.DiscardAsync(root, rows.Select(row => row.Entry.RelativePath));
+        await RefreshGitAsync(root);
         PollFilesOnDisk(); // reload open files that git just changed
     }
 
     private async Task CommitAsync(string message)
     {
         if (_gitPanel?.Root is not { } root) return;
-        if (_files.Documents.Any(d => d.IsDirty && d.FilePath?.StartsWith(root, StringComparison.OrdinalIgnoreCase) == true)
+        if (_files.Documents.Any(d => d.IsDirty && d.FilePath is { } path && RepositoryComparer.Equals(root, GitService.FindRoot(path)))
             && await Dialogs.Ask(this, "git", Loc.T("Git.UnsavedBeforeCommit"), Loc.T("Git.Commit"), Loc.T("Button.Cancel")) != 0)
             return;
-        _gitPanel.SetInfo(Loc.T("Git.Committing"));
+        _gitPanel.SetInfo(root, Loc.T("Git.Committing"));
         var r = await GitService.CommitAsync(root, message);
-        if (r.ExitCode != 0) _gitPanel.SetInfo(Loc.T("Git.Failed")); // the git console shows why
+        if (r.ExitCode != 0) _gitPanel.SetInfo(root, Loc.T("Git.Failed")); // the git console shows why
         else
         {
-            _gitPanel.CommitMessage = "";
-            _gitPanel.SetInfo(Loc.T("Git.Committed"));
+            _gitPanel.ClearCommitMessage(root, message);
+            _gitPanel.SetInfo(root, Loc.T("Git.Committed"));
             await RefreshHeadDiffAsync(root);
         }
         await RefreshGitAsync(root);
@@ -154,10 +194,10 @@ public partial class MainWindow
     private async Task PushAsync()
     {
         if (_gitPanel?.Root is not { } root) return;
-        _gitPanel.SetInfo(Loc.T("Git.Pushing"));
+        _gitPanel.SetInfo(root, Loc.T("Git.Pushing"));
         ShowGitConsole();
         var r = await GitService.PushAsync(root);
-        _gitPanel.SetInfo(Loc.T(r.ExitCode == 0 ? "Git.Pushed" : "Git.Failed"));
+        _gitPanel.SetInfo(root, Loc.T(r.ExitCode == 0 ? "Git.Pushed" : "Git.Failed"));
         await RefreshGitAsync(root);
     }
 
@@ -169,13 +209,13 @@ public partial class MainWindow
     private async Task PullAsync()
     {
         if (_gitPanel?.Root is not { } root) return;
-        if (_files.Documents.Any(d => d.IsDirty && d.FilePath?.StartsWith(root, StringComparison.OrdinalIgnoreCase) == true)
+        if (_files.Documents.Any(d => d.IsDirty && d.FilePath is { } path && RepositoryComparer.Equals(root, GitService.FindRoot(path)))
             && await Dialogs.Ask(this, "git pull", Loc.T("Git.UnsavedBeforePull"), Loc.T("Git.Pull"), Loc.T("Button.Cancel")) != 0)
             return;
-        _gitPanel.SetInfo(Loc.T("Git.Pulling"));
+        _gitPanel.SetInfo(root, Loc.T("Git.Pulling"));
         ShowGitConsole();
         var r = await GitService.PullAsync(root);
-        _gitPanel.SetInfo(Loc.T(r.ExitCode == 0 ? "Git.Pulled" : "Git.Failed"));
+        _gitPanel.SetInfo(root, Loc.T(r.ExitCode == 0 ? "Git.Pulled" : "Git.Failed"));
         PollFilesOnDisk();
         await RefreshGitAsync(root);
     }
@@ -204,8 +244,9 @@ public partial class MainWindow
     {
         static string Norm(string p) => Path.GetFullPath(p).TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
         string r = Norm(root);
-        return _gitPanel?.Root is { } shown && string.Equals(Norm(shown), r, StringComparison.OrdinalIgnoreCase)
-            || _files.Documents.Any(d => d.FilePath?.StartsWith(r, StringComparison.OrdinalIgnoreCase) == true);
+        return (_gitPanel?.Root is { } shown && RepositoryComparer.Equals(Norm(shown), r))
+            || (_launchedGitRoot is { } launched && RepositoryComparer.Equals(Norm(launched), r))
+            || _files.Documents.Any(d => d.FilePath is { } path && RepositoryComparer.Equals(GitService.FindRoot(path), root));
     }
 
     /// <summary>A hint under a failed pull: it only fast-forwards, so diverged branches need the user's decision.</summary>
@@ -223,7 +264,7 @@ public partial class MainWindow
 
     private void ShowGitLog(string root)
     {
-        if (_gitLog is { } open && open.Root == root) { open.Activate(); return; }
+        if (_gitLog is { } open && RepositoryComparer.Equals(open.Root, root)) { open.Activate(); return; }
         _gitLog?.Close();
         var window = _gitLog = new GitLogWindow(root);
         window.Closed += (_, _) => _gitLog = null;
@@ -250,12 +291,13 @@ public partial class MainWindow
         {
             string head = Decode(await GitService.ShowAsync(root, "HEAD", e.OriginalPath ?? rel));
             string index = Decode(await GitService.ShowAsync(root, ":", rel));
-            if (_active is null) return;
+            if (!RepositoryComparer.Equals(_gitPanel?.Root, root)) return;
             OpenDiff($"HEAD: {rel}", DiffView.ReadOnlyDocument(head), false, $"{Loc.T("Git.Index")}: {rel}", DiffView.ReadOnlyDocument(index), false, e.FullPath);
             _headComparison = new(root, rel, null, e.OriginalPath);
             return;
         }
         byte[]? baseBytes = e.IsUntracked ? null : await GitService.ShowAsync(root, ":", rel) ?? await GitService.ShowAsync(root, "HEAD", rel);
+        if (!RepositoryComparer.Equals(_gitPanel?.Root, root)) return;
         string baseText = Decode(baseBytes);
         if (_files.FindByPath(e.FullPath) is { } open)
         {
@@ -264,7 +306,7 @@ public partial class MainWindow
             return;
         }
         string working = File.Exists(e.FullPath) ? TextFile.Decode(await File.ReadAllBytesAsync(e.FullPath)).Text : "";
-        if (_active is null) NewDocument();
+        if (!RepositoryComparer.Equals(_gitPanel?.Root, root)) return;
         OpenDiff($"{Loc.T("Git.Index")}: {rel}", DiffView.ReadOnlyDocument(baseText), false, Loc.T("Diff.Working", Path.GetFileName(rel)), DiffView.ReadOnlyDocument(working), false, e.FullPath);
     }
 

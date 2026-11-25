@@ -435,6 +435,8 @@ public partial class MainWindow
 
     private void SaveSession()
     {
+        if (_gitOnlyStartup && _files.Documents.All(doc => doc.FilePath is null)) return;
+        _gitOnlyStartup = false;
         if (_active is not null)
         {
             _active.CaretOffset = Editor.CaretOffset;

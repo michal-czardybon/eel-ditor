@@ -33,10 +33,10 @@ public class GitConsoleTests
         return dir;
     }
 
-    private static MainWindow Open(string file)
+    private static MainWindow Open(params string[] files)
     {
         SettingsStore.UseDirectory(TestDirs.New());
-        var w = new MainWindow(new AppSettings(), [file]);
+        var w = new MainWindow(new AppSettings(), files);
         w.Show();
         var until = DateTime.UtcNow.AddSeconds(30);
         while (!w.StartupCompleted && DateTime.UtcNow < until) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(10); }
@@ -60,6 +60,54 @@ public class GitConsoleTests
     private static void Click(MainWindow w, string label) =>
         Panel(w).GetVisualDescendants().OfType<Button>().First(b => (b.Content as string) == label)
             .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+
+    [AvaloniaFact]
+    public async Task RepositoryPicker_SwitchesStatusAndCommitDraftWithoutSwitchingFiles()
+    {
+        if (!GitService.IsAvailable) return;
+        string first = await Init(NewDir()), second = await Init(NewDir());
+        string a = Path.Combine(first, "a.txt"), b = Path.Combine(second, "b.txt");
+        File.WriteAllText(a, "one\n");
+        File.WriteAllText(b, "two\n");
+        var w = Open(a, b);
+        Until(() => Panel(w).Root == second);
+        var picker = Panel(w).GetVisualDescendants().OfType<ComboBox>().Single(c => c.Name == "GitRepositories");
+        Assert.Equal(new[] { first, second }.Order(StringComparer.OrdinalIgnoreCase), picker.Items.Cast<string>());
+        Panel(w).CommitMessage = "second draft";
+        picker.SelectedItem = first;
+        Until(() => Panel(w).Root == first && Rows(w, staged: false).Any(r => r.Name == "a.txt"));
+        Assert.Equal(b, ((OpenFilesModel)w.DataContext!).Active!.FilePath);
+        Assert.Equal("", Panel(w).CommitMessage);
+        Panel(w).CommitMessage = "first draft";
+        picker.SelectedItem = second;
+        Until(() => Panel(w).Root == second);
+        Assert.Equal("second draft", Panel(w).CommitMessage);
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task RepositoryLaunch_OpensGitWithoutOpeningFilesOrReplacingTheSavedSession()
+    {
+        if (!GitService.IsAvailable) return;
+        string root = await Init(NewDir());
+        string file = Path.Combine(root, "a.txt");
+        File.WriteAllText(file, "one\n");
+        await Git(root, "add", "a.txt");
+        SettingsStore.UseDirectory(TestDirs.New());
+        SettingsStore.SaveSession(new Session { ActivePath = file, Files = [new SessionFile { Path = file }] });
+
+        var w = new MainWindow(new AppSettings(), [SingleInstance.GitArgumentPrefix + root]);
+        w.Show();
+        Until(() => Panel(w).Root == root && w.StartupCompleted);
+        Assert.Same(w.GitTab, w.SideTabs.SelectedItem);
+        var docs = ((OpenFilesModel)w.DataContext!).Documents;
+        Assert.Empty(docs);
+        Panel(w).SelectRows(staged: true, _ => true);
+        Until(() => w.CurrentDiffView is not null);
+        Assert.Empty(docs);
+        w.Close();
+        Assert.Equal(file, SettingsStore.LoadSession().ActivePath);
+    }
 
     [AvaloniaFact]
     public async Task StageAndUnstage_TheSelectedFiles_AndTheConsoleShowsTheCommands()

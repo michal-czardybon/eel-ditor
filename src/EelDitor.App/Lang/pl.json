@@ -156,7 +156,7 @@
   "Git.Index": "Indeks",
   "Git.MessageRequired": "Wpisz opis commita.",
   "Git.MessageWatermark": "Opis commita (Ctrl+Enter: commit)",
-  "Git.NoRepository": "Bieżący plik nie jest w repozytorium git",
+  "Git.NoRepository": "Brak repozytoriów Git",
   "Git.NoRepositoryHint": "Otwórz plik z repozytorium git, żeby zobaczyć jego zmiany.",
   "Git.NoUpstream": "bez gałęzi zdalnej",
   "Git.NotAvailable": "Nie znaleziono programu git w PATH.",

@@ -118,16 +118,17 @@ public partial class MainWindow : Window
             NativeSplash.Close();
             EnsureOnScreen();
             BringToFront();
-            await RestoreSessionAsync();
-            foreach (var a in args.Where(a => !a.StartsWith('-')))
-                await OpenFileAsync(a);
-            if (_files.Documents.Count == 0) NewDocument();
-            Editor.Focus();
+            _gitOnlyStartup = RequestedGitRoot(args) is not null;
+            if (!_gitOnlyStartup) await RestoreSessionAsync();
+            await OpenLaunchTargetsAsync(args);
+            if (!_gitOnlyStartup && _files.Documents.Count == 0) NewDocument();
+            if (_files.Documents.Count == 0) Editor.IsReadOnly = true;
+            if (!_gitOnlyStartup) Editor.Focus();
             _sessionRestored = true;
             StartupTrace.Mark("session restored");
             ScheduleSessionSave();
         };
-        _files.GroupsRebuilt += (_, _) => ScheduleSessionSave();
+        _files.GroupsRebuilt += (_, _) => { ScheduleSessionSave(); UpdateGitPanel(); };
     }
 
     /// <summary>
@@ -135,13 +136,25 @@ public partial class MainWindow : Window
     /// and only flash the taskbar button; see <see cref="NativeWindow.ForceForeground"/>.
     /// </summary>
     /// <summary>Files passed by a second start of the program (see <see cref="SingleInstance"/>).</summary>
-    internal async Task OpenFromOtherInstanceAsync(IReadOnlyList<string> files)
+    internal async Task OpenFromOtherInstanceAsync(IReadOnlyList<string> targets)
     {
         BringToFront();
-        foreach (var f in files) await OpenFileAsync(f);
+        await OpenLaunchTargetsAsync(targets);
         // The sending process may still hold the foreground for a moment; ask again once it has exited.
         await Task.Delay(250);
         BringToFront();
+    }
+
+    private async Task OpenLaunchTargetsAsync(IReadOnlyList<string> targets)
+    {
+        foreach (var file in targets.Where(arg => !arg.StartsWith('-')))
+            await OpenFileAsync(file);
+        if (RequestedGitRoot(targets) is { } root)
+        {
+            _launchedGitRoot = _selectedGitRoot = root;
+            ShowSideTab(GitTab);
+            UpdateGitPanel();
+        }
     }
 
     private static int LongestLine(TextDocument doc)

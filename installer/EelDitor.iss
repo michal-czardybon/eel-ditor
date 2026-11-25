@@ -1,10 +1,11 @@
 ﻿; Inno Setup script for Eel-ditor.
-; Build with build-installer.ps1 (publishes the app, then runs ISCC), or: ISCC installer\EelDitor.iss
-; after `dotnet publish` into publish\win-x64.
+; Build with build-installer.ps1, which publishes the app and builds the Explorer extension before running ISCC.
 
 #define AppName "Eel-ditor"
 #define AppExe "EelDitor.exe"
 #define SourceExe "..\publish\win-x64\" + AppExe
+#define GitMenuDll "EelDitorGitMenu.dll"
+#define GitMenuClsid "{{97A08EF1-70ED-467C-A525-681927453C90}"
 #define FileVersion GetFileVersion(SourceExe)
 #if FileVersion == ""
   #error Publish the application first (publish\win-x64\EelDitor.exe is missing).
@@ -37,6 +38,7 @@ SolidCompression=yes
 WizardStyle=modern
 ChangesAssociations=yes
 CloseApplications=yes
+CloseApplicationsFilter={#AppExe}
 #ifdef SIGN
 ; build-installer.ps1 passes /DSIGN and the "eelsign" tool (/Seelsign=…): Inno Setup signs the uninstaller and the
 ; setup program with it. The packed EelDitor.exe is signed by the script before compiling.
@@ -49,12 +51,14 @@ Name: "polish"; MessagesFile: "compiler:Languages\Polish.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]
-polish.TaskContextMenu=Dodaj „Otwórz w Eel-ditor” do menu kontekstowego plików
-english.TaskContextMenu=Add "Open with Eel-ditor" to the context menu of files
+polish.TaskContextMenu=Dodaj polecenia Eel-ditor do menu kontekstowego plików i repozytoriów Git
+english.TaskContextMenu=Add Eel-ditor commands to the context menus of files and Git repositories
 polish.TaskOpenWith=Dodaj Eel-ditor do listy „Otwórz za pomocą” dla plików tekstowych
 english.TaskOpenWith=Add Eel-ditor to "Open with" for text files
 polish.OpenWithVerb=Otwórz w Eel-ditor
 english.OpenWithVerb=Open with Eel-ditor
+polish.OpenGitVerb=Otwórz w Eel-ditor (Git)
+english.OpenGitVerb=Open in Eel-ditor (Git)
 polish.Integration=Integracja z Eksploratorem:
 english.Integration=Explorer integration:
 
@@ -65,6 +69,7 @@ Name: "openwith"; Description: "{cm:TaskOpenWith}"; GroupDescription: "{cm:Integ
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\publish\win-x64\{#GitMenuDll}"; DestDir: "{app}"; Flags: ignoreversion restartreplace uninsrestartdelete; Tasks: contextmenu
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
@@ -78,6 +83,16 @@ Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\{#AppExe
 Root: HKA; Subkey: "Software\Classes\*\shell\EelDitor"; ValueType: string; ValueName: ""; ValueData: "{cm:OpenWithVerb}"; Flags: uninsdeletekey; Tasks: contextmenu
 Root: HKA; Subkey: "Software\Classes\*\shell\EelDitor"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#AppExe}"",0"; Tasks: contextmenu
 Root: HKA; Subkey: "Software\Classes\*\shell\EelDitor\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: contextmenu
+
+; Explorer consults the native state handler before offering the static folder verb.
+Root: HKA; Subkey: "Software\Classes\CLSID\{#GitMenuClsid}"; ValueType: string; ValueName: ""; ValueData: "Eel-ditor Git folder menu"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKA; Subkey: "Software\Classes\CLSID\{#GitMenuClsid}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\{#GitMenuDll}"; Tasks: contextmenu
+Root: HKA; Subkey: "Software\Classes\CLSID\{#GitMenuClsid}\InprocServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Apartment"; Tasks: contextmenu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\EelDitorGit"; ValueType: string; ValueName: ""; ValueData: "{cm:OpenGitVerb}"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\EelDitorGit"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#AppExe}"",0"; Tasks: contextmenu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\EelDitorGit"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Single"; Tasks: contextmenu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\EelDitorGit"; ValueType: string; ValueName: "CommandStateHandler"; ValueData: "{#GitMenuClsid}"; Tasks: contextmenu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\EelDitorGit\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""--git=%1\."""; Tasks: contextmenu
 
 ; "Open with" list: the application and the text formats it supports.
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#AppName}"; Flags: uninsdeletekey; Tasks: openwith
