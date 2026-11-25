@@ -719,8 +719,21 @@ public static class MarkdownCommands
     public static bool RunTableCommand(TextEditor editor, MarkdownView view, TableCommand command)
     {
         if (TableAtCaret(editor, view) is not var (table, row, col)) return false;
-        var src = view.Source;
         var doc = editor.Document;
+        if (command == TableCommand.DeleteTable || (command == TableCommand.DeleteColumn && table.ColumnCount == 1))
+        {
+            if (editor.IsReadOnly) return false;
+            var first = doc.GetLineByNumber(table.FirstLine + 1);
+            var last = doc.GetLineByNumber(table.Rows[^1].LineIndex + 1);
+            int start = first.Offset;
+            doc.Remove(start, last.Offset + last.TotalLength - start);
+            editor.TextArea.ClearSelection();
+            editor.CaretOffset = start;
+            editor.TextArea.Caret.BringCaretToView();
+            return true;
+        }
+
+        var src = view.Source;
         int caretLine = editor.TextArea.Caret.Line;
         int caretCol = editor.TextArea.Caret.Column;
         IReadOnlyList<TableEdit> edits = command switch
@@ -1622,6 +1635,7 @@ public enum TableCommand
     InsertColumnRight,
     DeleteRow,
     DeleteColumn,
+    DeleteTable,
     MoveRowUp,
     MoveRowDown,
     MoveColumnLeft,

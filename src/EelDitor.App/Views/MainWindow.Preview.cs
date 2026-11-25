@@ -109,7 +109,7 @@ public partial class MainWindow
     /// <summary>Whether a document is HTML (by extension or "Display as").</summary>
     internal static bool IsHtml(EditorDocument doc) => doc.SyntaxOverride is { } o
         ? o is "html" or "text.html.basic"
-        : doc.FilePath is not null && Path.GetExtension(doc.FilePath).ToLowerInvariant() is ".html" or ".htm" or ".xhtml";
+        : doc.SyntaxPath is { } path && Path.GetExtension(path).ToLowerInvariant() is ".html" or ".htm" or ".xhtml";
 
     /// <summary>The HTML to preview for a document, or null when it is neither HTML nor Markdown.</summary>
     internal static string? PreviewHtml(EditorDocument doc) =>

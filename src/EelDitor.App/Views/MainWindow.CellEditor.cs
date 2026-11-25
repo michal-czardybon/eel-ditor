@@ -81,14 +81,19 @@ public partial class MainWindow
         Deactivated += (_, _) => Dispatcher.UIThread.Post(() => { if (!IsActive) CloseCellEditor(); });
     }
 
-    /// <summary>F2: the cell at the caret (the first cell of the row when the table is drawn as a grid).</summary>
+    /// <summary>F2: edit the current cell.</summary>
     private void EditCellAtCaret()
     {
-        if (_markdown is null || MarkdownCommands.TableAtCaret(Editor, _markdown) is not { } at) return;
+        if (_markdown is not { } view || MarkdownCommands.TableAtCaret(Editor, view) is not { } at) return;
+        if (view.TablesAsGrid && view.CurrentCell is { } current)
+        {
+            EditTableCell(current.Line, current.Cell);
+            return;
+        }
         int row = at.Row;
         if (at.Table.Rows[row].Kind == MdLineKind.TableSeparator) row++;
         if (row >= at.Table.Rows.Count) return;
-        EditTableCell(at.Table.FirstLine + row + 1, _markdown.TablesAsGrid ? 0 : Math.Max(0, at.Column));
+        EditTableCell(at.Table.FirstLine + row + 1, Math.Max(0, at.Column));
     }
 
     /// <param name="shownOffset">Where the caret goes in the cell's shown text (a double click); null: all selected.</param>
@@ -151,6 +156,8 @@ public partial class MainWindow
             : TableCellEdit.JoinSplitStyles(text, splitAnchors.Where(a => !a.Anchor.IsDeleted).Select(a => a.Split with { Newline = a.Anchor.Offset }));
         editor.TextArea.SelectionBrush = Palette.Selection;
         var cellView = new MarkdownView(editor, editor.Document, Palette, _active?.DirectoryPath) { ShowImages = false };
+        var trailingWhitespace = gridColumns is int cellColumns ? new CellTrailingWhitespaceGenerator(cellView, cellColumns) : null;
+        if (trailingWhitespace is not null) editor.TextArea.TextView.ElementGenerators.Add(trailingWhitespace);
         // Ctrl+click on a link (and its tooltip) works in the cell being edited too.
         var fromDocument = _active;
         cellView.LinkActivated += url => { if (fromDocument is not null) _ = OpenLinkAsync(url, fromDocument); };
@@ -244,8 +251,12 @@ public partial class MainWindow
             if (!Write(editor.Document.Text)) return;
             Editor.TextArea.TextView.EnsureVisualLines();
             if (view.CellRect(lineNumber, cellIndex) is { } now) popup.PlacementRect = Place(now);
-            if (view.Model.TableAtLine(lineNumber - 1) is { } t && view.GridLayout(t) is { } grid && cellIndex < grid.Widths.Length)
-                editor.Width = GridCellEditorSize(editor.Document.Text, grid.Widths[cellIndex]).Width;
+            if (trailingWhitespace is not null && view.Model.TableAtLine(lineNumber - 1) is { } t
+                && view.GridLayout(t) is { } grid && cellIndex < grid.Widths.Length)
+            {
+                trailingWhitespace.Columns = grid.Widths[cellIndex];
+                editor.Width = GridCellEditorSize(editor.Document.Text, trailingWhitespace.Columns).Width;
+            }
         }
         if (inPlace) editor.TextChanged += (_, _) => Dispatcher.UIThread.Post(Live, DispatcherPriority.Background);
 
@@ -285,13 +296,20 @@ public partial class MainWindow
                 case Key.Enter:
                     break; // a new line: a <br> in the cell (Shift+Enter too)
                 case Key.Left or Key.Right or Key.Up or Key.Down when e.KeyModifiers == KeyModifiers.None && AtCellEdge(editor, cellView, e.Key):
-                    // At the edge of the text the arrow goes on to the neighbouring cell, still editing.
-                    if (NeighbourCell(lineNumber, cellIndex, e.Key) is not { } next) break;
+                    var next = NeighbourCell(lineNumber, cellIndex, e.Key);
+                    var tableAtCell = view.Model.TableAtLine(lineNumber - 1);
+                    if (next is null && (e.Key is not (Key.Right or Key.Down) || tableAtCell is null)) break;
                     e.Handled = true;
                     if (!Save()) return;
                     popup.IsOpen = false;
                     int atOffset = e.Key is Key.Left or Key.Up ? int.MaxValue : 0;
-                    Dispatcher.UIThread.Post(() => EditTableCell(next.Line, next.Cell, atOffset), DispatcherPriority.Background);
+                    if (next is { } target)
+                        Dispatcher.UIThread.Post(() => EditTableCell(target.Line, target.Cell, atOffset), DispatcherPriority.Background);
+                    else
+                    {
+                        MoveCaretBelowTable(tableAtCell!);
+                        Editor.Focus();
+                    }
                     break;
                 case Key.Tab:
                     e.Handled = true;
@@ -373,13 +391,8 @@ public partial class MainWindow
     {
         var tv = Editor.TextArea.TextView;
         double charWidth = Math.Max(1, tv.WideSpaceWidth), lineHeight = tv.DefaultLineHeight;
-        // Room for exactly `columns` characters (half a character more, so the last one does not wrap) and the padding.
-        // Spaces just typed after the text are not in the column yet (the cell's width ignores them): room for them
-        // too, or each space would wrap to the next line until the next character is typed.
-        int shown = columns;
-        foreach (var para in text.Split('\n'))
-            if (para.TrimEnd(' ').Length <= columns) shown = Math.Max(shown, para.Length);
-        double width = (shown + 0.5) * charWidth + 4 * 2;
+        // Leave room for the caret to advance into the right padding of the grid cell.
+        double width = (columns + 1) * charWidth + 4 * 2;
         double height = WrappedLineCount(text, Math.Max(1, columns)) * lineHeight + 2 * 2 + 2;
         return (width, height);
     }
@@ -463,15 +476,25 @@ public partial class MainWindow
                     GoTo(target, horizontal ? (step < 0 ? int.MaxValue : 0) : current.Cell);
                     return true;
                 }
-                // Out of the table: the start of the line before / after it, if there is one.
-                int outside = step < 0 ? table.FirstLine : table.FirstLine + table.Rows.Count + 1;
-                if (outside >= 1 && outside <= doc.LineCount)
+                if (step > 0) MoveCaretBelowTable(table);
+                else if (table.FirstLine > 0)
                 {
-                    Editor.CaretOffset = doc.GetLineByNumber(outside).Offset;
+                    Editor.CaretOffset = doc.GetLineByNumber(table.FirstLine).Offset;
                     Editor.TextArea.Caret.BringCaretToView();
                 }
                 return true;
         }
+    }
+
+    private void MoveCaretBelowTable(MarkdownTable table)
+    {
+        var doc = Editor.Document;
+        int outside = table.Rows[^1].LineIndex + 2;
+        if (outside == doc.LineCount + 1 && !Editor.IsReadOnly)
+            doc.Insert(doc.TextLength, NewLineAt(doc.LineCount));
+        if (outside > doc.LineCount) return;
+        Editor.CaretOffset = doc.GetLineByNumber(outside).Offset;
+        Editor.TextArea.Caret.BringCaretToView();
     }
 
     /// <summary>

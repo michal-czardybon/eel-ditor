@@ -335,6 +335,15 @@ public sealed partial class DiffView : Grid
         _recompute.Start();
     }
 
+    internal Task RefreshSnapshotsAsync(string leftText, string? rightText)
+    {
+        if (_left.Document.Text == leftText && (rightText is null || _right.Document.Text == rightText))
+            return Task.CompletedTask;
+        if (_left.Document.Text != leftText) _left.Document.Text = leftText;
+        if (rightText is not null && _right.Document.Text != rightText) _right.Document.Text = rightText;
+        return RecomputeAsync();
+    }
+
     private async Task RecomputeAsync()
     {
         _recompute.Stop();

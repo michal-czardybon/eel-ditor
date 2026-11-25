@@ -65,6 +65,125 @@ public class TableCellFeedbackTests
     }
 
     [AvaloniaFact]
+    public void EditCellCommand_OpensTheSelectedGridColumn()
+    {
+        var (w, _) = Open("| A | B |\n|---|---|\n| left | right |\n");
+        var point = GridPoint(w, 3, 1, 0);
+        w.MouseDown(point, MouseButton.Left);
+        w.MouseUp(point, MouseButton.Left);
+        w.RunCommand("md.table.editCell");
+        Assert.Equal("right", w.CellEditor!.Text);
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public void SingleClickSelectsTheGridCell_AndTypingRequiresAnOpenCellEditor()
+    {
+        var (w, doc) = Open("| A | B |\n|---|---|\n| left | right |\n");
+        var point = GridPoint(w, 3, 1, 0);
+        w.MouseDown(point, MouseButton.Left);
+        w.MouseUp(point, MouseButton.Left);
+        Assert.Equal((3, 1), View(w).CurrentCell);
+        Assert.Null(w.CellEditor);
+        w.Editor.TextArea.PerformTextInput("x");
+        Assert.Equal("| left | right |", Line(doc, 3));
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public void TrailingSpaces_KeepTheCaretInsideTheGrid_AndAreKeptWhenTypingContinues()
+    {
+        var (w, doc) = Open("| A | B |\n|---|---|\n| left | hello |\n");
+        w.EditTableCell(3, 1, 5);
+        Settle();
+        var editor = w.CellEditor!;
+        var grid = w.Editor.TextArea.TextView;
+        var tv = editor.TextArea.TextView;
+        double CaretX()
+        {
+            tv.EnsureVisualLines();
+            var caret = tv.GetVisualPosition(editor.TextArea.Caret.Position, VisualYPosition.LineTop);
+            return caret.X - tv.HorizontalOffset + 2 * grid.WideSpaceWidth;
+        }
+        double before = CaretX();
+        editor.TextArea.PerformTextInput(" ");
+        Settle();
+        w.UpdateLayout();
+        double afterOneSpace = CaretX();
+        Assert.True(afterOneSpace > before + grid.WideSpaceWidth / 2,
+            $"Caret moved from {before} to {afterOneSpace}, character width {grid.WideSpaceWidth}, offset {editor.CaretOffset}.");
+
+        string spaces = new(' ', 20);
+        editor.TextArea.PerformTextInput(spaces[1..]);
+        Settle();
+        w.UpdateLayout();
+
+        Assert.Equal("hello" + spaces, editor.Text);
+        Assert.Equal("| left | hello |", Line(doc, 3));
+        var cell = View(w).CellRect(3, 1)!.Value;
+        Assert.InRange(CaretX(), before + grid.WideSpaceWidth / 2, cell.Width);
+
+        CellKey(w, Key.Left);
+        Assert.Equal(24, editor.CaretOffset);
+        CellKey(w, Key.Right);
+        Assert.Equal(25, editor.CaretOffset);
+        editor.TextArea.PerformTextInput("world");
+        Settle();
+        Assert.Equal("| left | hello" + spaces + "world |", Line(doc, 3));
+        w.Close();
+    }
+
+    [AvaloniaTheory]
+    [InlineData(Key.Down, false, false)]
+    [InlineData(Key.Right, false, false)]
+    [InlineData(Key.Down, true, false)]
+    [InlineData(Key.Right, true, false)]
+    [InlineData(Key.Right, false, true)]
+    [InlineData(Key.Down, true, true)]
+    public void ArrowsAtEndOfGrid_MoveToAnEditableLineBelowTheTable(Key key, bool editing, bool hasLineBelow)
+    {
+        const string table = "| A | B |\r\n|---|---|\r\n| left | right |";
+        string source = hasLineBelow ? table + "\r\n" : table;
+        var (w, doc) = Open(source);
+        if (editing)
+        {
+            w.EditTableCell(3, 1, 5);
+            CellKey(w, key);
+        }
+        else
+        {
+            w.Editor.CaretOffset = doc.Document.GetLineByNumber(3).EndOffset;
+            w.Editor.TextArea.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = key });
+            Settle();
+        }
+        Assert.Equal(table + "\r\n", doc.Document.Text);
+        Assert.Equal(4, w.Editor.TextArea.Caret.Line);
+        Assert.Null(w.CellEditor);
+        w.Editor.TextArea.PerformTextInput("Tekst za tabelą");
+        Assert.Equal(table + "\r\nTekst za tabelą", doc.Document.Text);
+        doc.Document.UndoStack.Undo();
+        if (!hasLineBelow) doc.Document.UndoStack.Undo();
+        Assert.Equal(source, doc.Document.Text);
+        w.Close();
+    }
+
+    [AvaloniaTheory]
+    [InlineData("md.table.delTable", "| A | B |\n|---|---|\n| left | right |")]
+    [InlineData("md.table.delCol", "| A |\n|---|\n| left |")]
+    public void DeletingATable_PreservesSurroundingTextAndCanBeUndone(string command, string table)
+    {
+        string source = "Przed\n\n" + table + "\n\nZa";
+        var (w, doc) = Open(source);
+        w.Editor.CaretOffset = doc.Document.GetLineByNumber(5).Offset + 2;
+        w.RunCommand(command);
+        Assert.Equal("Przed\n\n\nZa", doc.Document.Text);
+        Assert.Equal(3, w.Editor.TextArea.Caret.Line);
+        doc.Document.UndoStack.Undo();
+        Assert.Equal(source, doc.Document.Text);
+        w.Close();
+    }
+
+    [AvaloniaFact]
     public void EnterAtEndOfLastCell_ExtendsTheGridRowBeforeMoreTextIsTyped()
     {
         var (w, doc) = Open("| A | B |\n|---|---|\n| x | hello |\n\nBelow the table\n");

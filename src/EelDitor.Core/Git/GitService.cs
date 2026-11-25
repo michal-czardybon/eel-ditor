@@ -31,6 +31,8 @@ public sealed record GitCommit(string Hash, string Author, DateTimeOffset Date, 
     public string ShortHash => Hash.Length > 8 ? Hash[..8] : Hash;
 }
 
+public sealed record GitCommitFile(string Status, string Path, string? OriginalPath = null);
+
 /// <summary>
 /// Thin wrapper over the <c>git</c> command line. Runs at below-normal priority so it never competes with
 /// typing, and works with any git installation on PATH (no native libgit2 dependency).
@@ -204,13 +206,26 @@ public static class GitService
         return r.ExitCode == 0 ? r.Output : null;
     }
 
-    public static async Task<IReadOnlyList<GitCommit>> LogAsync(string root, string relativePath, int max = 500, CancellationToken ct = default)
+    public static async Task<IReadOnlyList<GitCommit>> LogAsync(string root, string? relativePath = null, int max = 500, CancellationToken ct = default)
     {
         if (!await AvailableAsync().ConfigureAwait(false)) return [];
-        var r = await Run(root, ["log", "--follow", "--name-only", $"-n{max}", "--date=iso-strict",
-            "--format=%x1e%H%x1f%an%x1f%ad%x1f%s", "--", relativePath], ct).ConfigureAwait(false);
+        string[] args = relativePath is null
+            ? ["log", "--topo-order", "-z", $"-n{max}", "--format=%H%x00%an%x00%aI%x00%s"]
+            : ["log", "--follow", "--name-only", $"-n{max}", "--date=iso-strict",
+                "--format=%x1e%H%x1f%an%x1f%ad%x1f%s", "--", relativePath];
+        var r = await Run(root, args, ct).ConfigureAwait(false);
         if (r.ExitCode != 0) return [];
         var commits = new List<GitCommit>();
+        if (relativePath is null)
+        {
+            var fields = Encoding.UTF8.GetString(r.Output).Split('\0');
+            for (int i = 0; i + 3 < fields.Length; i += 4)
+            {
+                DateTimeOffset.TryParse(fields[i + 2], out var date);
+                commits.Add(new GitCommit(fields[i], fields[i + 1], date, fields[i + 3], ""));
+            }
+            return commits;
+        }
         foreach (var record in Encoding.UTF8.GetString(r.Output).Split('\x1e', StringSplitOptions.RemoveEmptyEntries))
         {
             var lines = record.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -222,6 +237,26 @@ public static class GitService
             commits.Add(new GitCommit(f[0], f[1], date, f[3], path));
         }
         return commits;
+    }
+
+    /// <summary>Files changed against the first parent, or added in the initial commit.</summary>
+    public static async Task<IReadOnlyList<GitCommitFile>?> CommitFilesAsync(string root, string hash, CancellationToken ct = default)
+    {
+        var r = await Run(root, ["diff-tree", "--root", "--no-commit-id", "--name-status", "-z", "-r", "-M", "--first-parent", "-m", hash, "--"], ct)
+            .ConfigureAwait(false);
+        if (r.ExitCode != 0) return null;
+        var files = new List<GitCommitFile>();
+        var fields = Encoding.UTF8.GetString(r.Output).Split('\0');
+        for (int i = 0; i + 1 < fields.Length;)
+        {
+            string status = fields[i++];
+            string path = fields[i++];
+            if (status.Length == 0 || path.Length == 0) break;
+            if (status[0] is 'R' or 'C' && i < fields.Length && fields[i].Length > 0)
+                files.Add(new GitCommitFile(status, fields[i++], path));
+            else files.Add(new GitCommitFile(status, path));
+        }
+        return files;
     }
 
     /// <summary>The first parent of a commit, or null for a root commit.</summary>

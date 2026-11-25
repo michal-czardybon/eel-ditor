@@ -55,6 +55,7 @@ public sealed class GitPanel : DockPanel
     private readonly Button _commit = new() { Content = Loc.T("Git.Commit"), Classes = { "accent" } };
     private readonly Button _push = new() { Content = Loc.T("Git.Push") };
     private readonly Button _pull = new() { Content = Loc.T("Git.Pull") };
+    private readonly Button _log = new() { Content = Loc.T("Git.Log") };
     private readonly Button _stage = new() { Content = Loc.T("Git.StageButton"), IsEnabled = false };
     private readonly Button _unstage = new() { Content = Loc.T("Git.UnstageButton"), IsEnabled = false };
     private readonly Grid _body;
@@ -73,6 +74,8 @@ public sealed class GitPanel : DockPanel
         ToolTip.SetTip(_push, Loc.T("Git.PushTip"));
         _pull.Click += (_, _) => PullRequested?.Invoke();
         ToolTip.SetTip(_pull, Loc.T("Git.PullTip"));
+        _log.Click += (_, _) => LogRequested?.Invoke();
+        ToolTip.SetTip(_log, Loc.T("Git.LogTip"));
         // Stage / Unstage act on the files selected in the lists below.
         _stage.Click += (_, _) => { if (Rows(_unstaged) is { Count: > 0 } rows) StageRequested?.Invoke(rows); };
         ToolTip.SetTip(_stage, Loc.T("Git.StageTip"));
@@ -89,7 +92,7 @@ public sealed class GitPanel : DockPanel
         SetDock(top, Dock.Top);
         Children.Add(top);
         // Git's own words for its commands (Stage, Commit, Push…), in every language; the tooltips explain them.
-        var actions = ButtonBar.Strip([rescan, _stage, _pull], new WrapPanel());
+        var actions = ButtonBar.Strip([rescan, _stage, _pull, _log], new WrapPanel());
         SetDock(actions, Dock.Top);
         Children.Add(actions);
         _message.Margin = new Thickness(8, 6, 8, 4);
@@ -100,7 +103,7 @@ public sealed class GitPanel : DockPanel
         Children.Add(_info);
 
         // Narrower than the usual toolbar buttons, so each row fits in the default sidebar width.
-        foreach (var b in new[] { rescan, _stage, _pull, _unstage, _commit, _push, console }) b.Padding = new Thickness(7, 0);
+        foreach (var b in new[] { rescan, _stage, _pull, _log, _unstage, _commit, _push, console }) b.Padding = new Thickness(7, 0);
         // Unstaged header and list; staged header, its actions with the commit message, and list.
         _body = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto,Auto,*") };
         AddSection(0, _unstagedHeader, "Git.StageAll", () => StageRequested?.Invoke(Rows(_unstaged, all: true)), _unstaged);
@@ -119,6 +122,7 @@ public sealed class GitPanel : DockPanel
     public event Action<string>? CommitRequested;
     public event Action? PushRequested;
     public event Action? PullRequested;
+    public event Action? LogRequested;
     public event Action? ConsoleRequested;
     public event Action<GitRow>? ShowChangesRequested;
     public event Action<GitRow>? OpenRequested;
@@ -136,7 +140,7 @@ public sealed class GitPanel : DockPanel
         Root = status?.Root;
         _body.IsVisible = status is not null;
         _commit.IsEnabled = status?.Entries.Any(e => e.HasStaged) == true;
-        _push.IsEnabled = _pull.IsEnabled = status is not null;
+        _push.IsEnabled = _pull.IsEnabled = _log.IsEnabled = status is not null;
         if (status is null)
         {
             _repo.FullPath = Loc.T("Git.NoRepository");

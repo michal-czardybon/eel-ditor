@@ -79,7 +79,7 @@ public class GitConsoleTests
         // Each section has its own toolbar.
         var bars = panel.GetVisualDescendants().OfType<WrapPanel>().Where(p => p.Children.FirstOrDefault() is Button)
             .Select(p => string.Join(' ', p.Children.OfType<Button>().Select(b => b.Content)));
-        Assert.Equal(["Rescan Stage Pull", $"Unstage Commit Push {Loc.T("Git.Console")}"], bars);
+        Assert.Equal(["Rescan Stage Pull Log", $"Unstage Commit Push {Loc.T("Git.Console")}"], bars);
         Assert.False(panel.StageButton.IsEnabled);                     // nothing selected
         panel.SelectRows(staged: false, r => r.Name == "a.txt");
         Dispatcher.UIThread.RunJobs();
@@ -99,6 +99,71 @@ public class GitConsoleTests
         Assert.Contains("$ git add -- a.txt", text);
         Assert.Contains("$ git restore --staged -- a.txt", text);
         Assert.Contains(Loc.T("Git.ConsoleDone"), text);
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Log_ShowsCommitAuthorsAndChangesFilesWhenAnotherCommitIsSelected()
+    {
+        if (!GitService.IsAvailable) return;
+        string root = await Init(NewDir());
+        string path = Path.Combine(root, "a.txt");
+        File.WriteAllText(path, "first\n");
+        await Git(root, "add", "a.txt");
+        await Git(root, "commit", "-q", "--author", "Anna <anna@example.invalid>", "-m", "first commit");
+        File.WriteAllText(Path.Combine(root, "b.txt"), "second\n");
+        await Git(root, "add", "b.txt");
+        await Git(root, "commit", "-q", "--author", "Jan <jan@example.invalid>", "-m", "second commit");
+
+        var w = Open(path);
+        Until(() => Panel(w).Root is not null);
+        Click(w, "Log");
+        var log = Assert.Single(w.OwnedWindows.OfType<GitLogWindow>());
+        var tables = log.GetVisualDescendants().OfType<ListBox>().ToArray();
+        Assert.Equal(2, tables.Length);
+        var commits = tables[0];
+        var files = tables[1];
+        Until(() => (files.ItemsSource as IEnumerable<GitCommitFile>)?.Any() == true);
+        Assert.Equal(["Jan", "Anna"], commits.ItemsSource!.Cast<GitCommit>().Select(c => c.Author));
+        Assert.Equal("b.txt", Assert.Single(files.ItemsSource!.Cast<GitCommitFile>()).Path);
+        commits.SelectedIndex = 1;
+        Until(() => files.ItemsSource?.Cast<GitCommitFile>().SingleOrDefault()?.Path == "a.txt");
+        log.Close();
+        w.Close();
+    }
+
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Commit_RefreshesTheOpenHeadComparison(bool stagedComparison)
+    {
+        if (!GitService.IsAvailable) return;
+        string root = await Init(NewDir());
+        string path = Path.Combine(root, "a.txt");
+        File.WriteAllText(path, "original\n");
+        await Git(root, "add", "a.txt");
+        await Git(root, "commit", "-q", "-m", "init");
+        File.WriteAllText(path, "staged\n");
+        await Git(root, "add", "a.txt");
+        File.WriteAllText(path, "working\n");
+
+        var w = Open(path);
+        Until(() => Rows(w, staged: true).Any());
+        if (stagedComparison) Panel(w).SelectRows(staged: true, _ => true);
+        else w.RunCommand("diff.head");
+        Until(() => w.CurrentDiffView is not null);
+        var diff = w.CurrentDiffView!;
+        Assert.Equal("original", diff.LeftEditor.Text.Trim());
+        var right = diff.RightEditor.Document;
+        Assert.Equal(stagedComparison ? "staged" : "working", right.Text.Trim());
+        Assert.False(diff.Diff.Identical);
+
+        Panel(w).CommitMessage = "update a";
+        Click(w, "Commit");
+        Until(() => diff.LeftEditor.Text.Trim() == "staged" && diff.Diff.Identical == stagedComparison);
+        Assert.Same(diff, w.CurrentDiffView);
+        Assert.Same(right, diff.RightEditor.Document);
+        Assert.Equal(stagedComparison ? "staged" : "working", right.Text.Trim());
         w.Close();
     }
 

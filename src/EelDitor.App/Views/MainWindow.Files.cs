@@ -185,10 +185,15 @@ public partial class MainWindow
         if (path is null || saveAs)
         {
             var start = doc.DirectoryPath is { Length: > 0 } dir ? await StorageProvider.TryGetFolderFromPathAsync(dir) : null;
+            bool newMarkdown = doc.IsUntitled && doc.RevisionPath is null && doc.IsMarkdown;
             var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
                 Title = Loc.T("Menu.File.SaveAs"),
-                SuggestedFileName = doc.FileName,
+                SuggestedFileName = newMarkdown ? doc.FileName + ".md" : doc.FileName,
+                FileTypeChoices = newMarkdown
+                    ? [new FilePickerFileType("Markdown") { Patterns = ["*.md", "*.markdown"] },
+                        new FilePickerFileType(Loc.T("Syntax.PlainText")) { Patterns = ["*.txt"] }, FilePickerFileTypes.All]
+                    : null,
                 SuggestedStartLocation = start,
                 ShowOverwritePrompt = true,
             });
@@ -243,9 +248,10 @@ public partial class MainWindow
                 _markdown?.Dispose();
                 _markdown = null;
                 ApplySyntax(doc);
+                SchedulePreview();
             }
         }
-        if (ReferenceEquals(doc, _active)) { UpdateStatus(); UpdateInfoBar(); UpdateTitle(); }
+        if (ReferenceEquals(doc, _active)) { UpdateStatus(); UpdateInfoBar(); UpdateTitle(); RefreshCommandStates(); }
         SetStatusMessage(Loc.T("Status.Saved", doc.FileName));
         RequestGitRefresh(doc);
         return true;

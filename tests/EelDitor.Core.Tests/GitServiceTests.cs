@@ -71,6 +71,28 @@ public sealed class GitServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RepositoryLog_ListsChangedFilesIncludingRenamesAndMergeChanges()
+    {
+        if (!GitService.IsAvailable) return;
+        var root = await InitRepoAsync();
+        await Git("checkout", "-q", "-b", "side");
+        await Git("mv", "a.txt", "new name.txt");
+        await Git("commit", "-q", "-m", "rename");
+        await Git("checkout", "-q", "main");
+        await Git("merge", "-q", "--no-ff", "side", "-m", "merge");
+
+        var history = await GitService.LogAsync(root);
+        Assert.Equal(["merge", "rename", "first"], history.Select(c => c.Subject));
+        foreach (var commit in history.Take(2))
+        {
+            var file = Assert.Single((await GitService.CommitFilesAsync(root, commit.Hash))!);
+            Assert.Equal(new GitCommitFile("R100", "new name.txt", "a.txt"), file);
+        }
+        Assert.Equal(new GitCommitFile("A", "a.txt"),
+            Assert.Single((await GitService.CommitFilesAsync(root, history[^1].Hash))!));
+    }
+
+    [Fact]
     public async Task Discard_RestoresTheWorkTree_AndUntrackKeepsTheFile()
     {
         if (!GitService.IsAvailable) return;

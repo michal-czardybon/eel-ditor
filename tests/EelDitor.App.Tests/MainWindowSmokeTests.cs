@@ -38,6 +38,26 @@ public class MainWindowSmokeTests
     }
 
     [AvaloniaFact]
+    public void UntitledDocument_EnablesMarkdownCommandsAndPreview()
+    {
+        var w = Open();
+        var doc = ((EelDitor.App.Documents.OpenFilesModel)w.DataContext!).Documents.Single();
+        Assert.True(doc.IsMarkdown);
+        Assert.True(w.CommandCanExecute("md.h1"));
+        w.Editor.TextArea.PerformTextInput("Nagłówek");
+        w.RunCommand("md.h1");
+        Assert.Equal("# Nagłówek", doc.Document.Text);
+        Assert.Contains("<h1", MainWindow.PreviewHtml(doc)!);
+        Assert.Contains("<h1", MainWindow.ExportHtml(doc));
+
+        // The first save supplies the extension used by automatic syntax detection.
+        doc.FilePath = Path.Combine(TestDirs.New(), "notes.txt");
+        Assert.False(doc.IsMarkdown);
+        Assert.Null(MainWindow.PreviewHtml(doc));
+        Assert.Equal("# Nagłówek", doc.Document.Text);
+    }
+
+    [AvaloniaFact]
     public void ShortcutsDoNotThrow()
     {
         var w = Open();

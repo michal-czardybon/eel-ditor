@@ -17,6 +17,7 @@ namespace EelDitor.App.Views;
 public partial class MainWindow
 {
     private GitPanel? _gitPanel;
+    private GitLogWindow? _gitLog;
     private DocumentMap? _documentMap;
 
     /// <summary>Creates the sidebar tabs' content: the document map under the file tree and the git panel.</summary>
@@ -37,6 +38,7 @@ public partial class MainWindow
         panel.CommitRequested += message => _ = CommitAsync(message);
         panel.PushRequested += () => _ = PushAsync();
         panel.PullRequested += () => _ = PullAsync();
+        panel.LogRequested += () => { if (panel.Root is { } root) ShowGitLog(root); };
         panel.ConsoleRequested += ShowGitConsole;
         // Static events: this window stops listening when it closes.
         Action<GitService.Command> started = c => Dispatcher.UIThread.Post(() => OnGitCommand(c, finished: false));
@@ -143,6 +145,7 @@ public partial class MainWindow
         {
             _gitPanel.CommitMessage = "";
             _gitPanel.SetInfo(Loc.T("Git.Committed"));
+            await RefreshHeadDiffAsync(root);
         }
         await RefreshGitAsync(root);
     }
@@ -218,6 +221,15 @@ public partial class MainWindow
         window.Show(this);
     }
 
+    private void ShowGitLog(string root)
+    {
+        if (_gitLog is { } open && open.Root == root) { open.Activate(); return; }
+        _gitLog?.Close();
+        var window = _gitLog = new GitLogWindow(root);
+        window.Closed += (_, _) => _gitLog = null;
+        window.Show(this);
+    }
+
     /// <summary>
     /// Shows a change from the git tab in the comparison view: unstaged = index ↔ work tree (the live document
     /// when the file is open), staged = HEAD ↔ index.
@@ -240,6 +252,7 @@ public partial class MainWindow
             string index = Decode(await GitService.ShowAsync(root, ":", rel));
             if (_active is null) return;
             OpenDiff($"HEAD: {rel}", DiffView.ReadOnlyDocument(head), false, $"{Loc.T("Git.Index")}: {rel}", DiffView.ReadOnlyDocument(index), false, e.FullPath);
+            _headComparison = new(root, rel, null, e.OriginalPath);
             return;
         }
         byte[]? baseBytes = e.IsUntracked ? null : await GitService.ShowAsync(root, ":", rel) ?? await GitService.ShowAsync(root, "HEAD", rel);
@@ -367,7 +380,7 @@ public partial class MainWindow
                 menu.Items.Add(new Separator());
                 foreach (var id in new[] { "md.table.rowAbove", "md.table.rowBelow", "md.table.colLeft", "md.table.colRight" }) menu.Items.Add(Item(id, track: false));
                 menu.Items.Add(new Separator());
-                foreach (var id in new[] { "md.table.delRow", "md.table.delCol" }) menu.Items.Add(Item(id, track: false));
+                foreach (var id in new[] { "md.table.delRow", "md.table.delCol", "md.table.delTable" }) menu.Items.Add(Item(id, track: false));
                 menu.Items.Add(new Separator());
                 menu.Items.Add(Item("md.table.editCell", track: false));
                 menu.Items.Add(new Separator());

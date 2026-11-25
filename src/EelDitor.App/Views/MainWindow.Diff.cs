@@ -17,6 +17,10 @@ namespace EelDitor.App.Views;
 public partial class MainWindow
 {
     private DiffView? _diffView;
+    private HeadComparison? _headComparison;
+    private int _headRefreshVersion;
+
+    private sealed record HeadComparison(string Root, string Path, EditorDocument? Document, string? OriginalPath = null);
 
     internal DiffView? CurrentDiffView => _diffView;
     private DiffLinePanel? _diffLinePanel;
@@ -68,6 +72,7 @@ public partial class MainWindow
         bool sameDoc = ReferenceEquals(_diffView.RightEditor.Document, Editor.Document);
         EditorHost.Children.Remove(_diffView);
         _diffView = null;
+        _headComparison = null;
         _documentMap?.Follow(null);
         UpdateDocumentHeader();
         _diffLinePanel = null;
@@ -95,7 +100,27 @@ public partial class MainWindow
         Activate(doc);
         OpenDiff($"HEAD: {rel}", bytes is null ? "" : DecodeFor(doc, bytes),
             Loc.T("Diff.Working", doc.FileName), doc.Document, rightEditable: true, doc.FilePath);
+        _headComparison = new(root, rel, doc);
         if (bytes is null) SetStatusMessage(Loc.T("Git.NotInHead", rel));
+    }
+
+    private async Task RefreshHeadDiffAsync(string root)
+    {
+        if (_diffView is not { } view || _headComparison is not { } comparison
+            || !string.Equals(comparison.Root, root, StringComparison.OrdinalIgnoreCase)) return;
+        int version = ++_headRefreshVersion;
+        var head = await GitService.ShowAsync(root, "HEAD", comparison.Path);
+        if (head is null && comparison.OriginalPath is { } original)
+            head = await GitService.ShowAsync(root, "HEAD", original);
+
+        // An editable working side stays attached to its live document. A staged comparison has two snapshots.
+        var index = comparison.Document is null ? await GitService.ShowAsync(root, ":", comparison.Path) : null;
+        if (!ReferenceEquals(view, _diffView) || version != _headRefreshVersion) return;
+        string Decode(byte[]? bytes) => bytes is null ? ""
+            : comparison.Document is { } doc ? DecodeFor(doc, bytes) : TextFile.Decode(bytes).Text;
+        string left = Decode(head);
+        string? right = comparison.Document is null ? Decode(index) : null;
+        await view.RefreshSnapshotsAsync(left, right);
     }
 
     private async Task CompareWithDiskAsync(EditorDocument doc)
@@ -174,6 +199,7 @@ public partial class MainWindow
         var loaded = TextFile.Decode(bytes, doc.Encoding.IsUnicode ? null : doc.Encoding);
         var rev = new EditorDocument(new TextDocument(loaded.Text), null)
         {
+            RevisionPath = commit.PathAtCommit,
             Encoding = loaded.Encoding,
             Eol = loaded.Eol.Dominant(doc.Eol),
         };

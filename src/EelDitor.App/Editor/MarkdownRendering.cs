@@ -258,6 +258,11 @@ public sealed class MarkdownView : IDisposable
     private void OnTextEntering(object? sender, TextInputEventArgs e)
     {
         if (string.IsNullOrEmpty(e.Text) || _editor.IsReadOnly) return;
+        if (_editor.SelectionLength == 0 && CaretGridRow is not null)
+        {
+            e.Handled = true;
+            return;
+        }
         EndLineBreakUndoGroup();
         // Everything done here and the insertion itself are one undo step (ended in OnTextEntered).
         _document.UndoStack.StartUndoGroup();
@@ -848,6 +853,58 @@ internal sealed class HiddenElement(int documentLength) : WholeElement(documentL
 {
     public override TextRun CreateTextRun(int startVisualColumn, ITextRunConstructionContext context) =>
         new ZeroWidthRun(TextRunProperties, 0, RunLength(startVisualColumn));
+}
+
+/// <summary>
+/// The grid trims trailing whitespace. Draw it at its regular width until it reaches the available space.
+/// </summary>
+internal sealed class CellTrailingWhitespaceGenerator(MarkdownView view, int columns) : VisualLineElementGenerator
+{
+    internal const double TrailingSpaceAllowance = 0.75;
+    public int Columns { get; set; } = columns;
+
+    private int _start;
+    private int _length;
+    private double _scale;
+
+    public override void StartGeneration(ITextRunConstructionContext context)
+    {
+        base.StartGeneration(context);
+        var line = context.VisualLine.FirstDocumentLine;
+        var text = context.Document.GetText(line.Offset, line.Length);
+        int trimmedLength = text.AsSpan().TrimEnd().Length;
+        _start = line.Offset + trimmedLength;
+        _length = line.Length - trimmedLength;
+        if (_length == 0) return;
+
+        var render = view.RenderFor(line);
+        string shown = new(Enumerable.Range(0, trimmedLength).Where(i => !render.IsHidden(i)).Select(i => text[i]).ToArray());
+        var (start, length) = TableWrap.WrapRanges(shown, Columns)[^1];
+        int used = TextWidth.Of(shown.AsSpan(start, length));
+        _scale = Math.Min(1, (Math.Max(0, Columns - used) + TrailingSpaceAllowance) / _length);
+    }
+
+    public override int GetFirstInterestedOffset(int startOffset) =>
+        _length > 0 && _scale < 1 && startOffset <= _start ? _start : -1;
+
+    public override VisualLineElement? ConstructElement(int offset) =>
+        offset == _start && _length > 0 && _scale < 1 ? new TrailingWhitespaceElement(CurrentContext.VisualLine, _length, _scale) : null;
+
+    private sealed class TrailingWhitespaceElement(VisualLine line, int length, double scale) : VisualLineText(line, length)
+    {
+        // One run per space gives the formatter a caret stop at each offset.
+        public override TextRun CreateTextRun(int startVisualColumn, ITextRunConstructionContext context) =>
+            new TrailingSpaceRun(TextRunProperties, scale * context.TextView.WideSpaceWidth);
+    }
+
+    private sealed class TrailingSpaceRun(TextRunProperties properties, double width) : DrawableTextRun
+    {
+        public override int Length => 1;
+        public override TextRunProperties Properties => properties;
+        public override Size Size => new(width, 0);
+        public override double Baseline => 0;
+        public override void Draw(DrawingContext drawingContext, Point origin) { }
+    }
 }
 
 internal sealed class ZeroWidthRun(TextRunProperties properties, double height, int length = 1) : DrawableTextRun

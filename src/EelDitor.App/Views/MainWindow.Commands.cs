@@ -176,7 +176,8 @@ public partial class MainWindow
         Add("md.table.colLeft", "Menu.Md.Table.ColLeft", () => Table(TableCommand.InsertColumnLeft), ["Ctrl+Alt+Left"], () => InTable);
         Add("md.table.colRight", "Menu.Md.Table.ColRight", () => Table(TableCommand.InsertColumnRight), ["Ctrl+Alt+Right"], () => InTable);
         Add("md.table.delRow", "Menu.Md.Table.DeleteRow", () => Table(TableCommand.DeleteRow), ["Ctrl+Alt+Back"], () => InTable);
-        Add("md.table.delCol", "Menu.Md.Table.DeleteColumn", () => Table(TableCommand.DeleteColumn), ["Ctrl+Alt+Delete"], () => InTable);
+        Add("md.table.delCol", "Menu.Md.Table.DeleteColumn", () => Table(TableCommand.DeleteColumn), ["Ctrl+Alt+Delete"], () => InTable && !Editor.IsReadOnly);
+        Add("md.table.delTable", "Menu.Md.Table.DeleteTable", () => Table(TableCommand.DeleteTable), null, () => InTable && !Editor.IsReadOnly);
         Add("md.table.rowUp", "Menu.Md.Table.RowUp", () => Table(TableCommand.MoveRowUp), ["Alt+Up"], () => InTable);
         Add("md.table.rowDown", "Menu.Md.Table.RowDown", () => Table(TableCommand.MoveRowDown), ["Alt+Down"], () => InTable);
         Add("md.table.colMoveLeft", "Menu.Md.Table.ColMoveLeft", () => Table(TableCommand.MoveColumnLeft), ["Alt+Left"], () => InTable);
@@ -470,7 +471,7 @@ public partial class MainWindow
         MainMenu.Items.Add(Sub("Menu.Md.Table",
             Item("md.table.insert"), Item("md.table.editCell"), Sep(),
             Item("md.table.rowAbove"), Item("md.table.rowBelow"), Item("md.table.colLeft"), Item("md.table.colRight"), Sep(),
-            Item("md.table.delRow"), Item("md.table.delCol"), Sep(),
+            Item("md.table.delRow"), Item("md.table.delCol"), Item("md.table.delTable"), Sep(),
             Item("md.table.rowUp"), Item("md.table.rowDown"), Item("md.table.colMoveLeft"), Item("md.table.colMoveRight"), Sep(),
             Item("md.table.selCol"), Item("md.table.selRow"), Item("md.table.copyCol"), Sep(),
             Item("md.table.split"), Item("md.table.format")));

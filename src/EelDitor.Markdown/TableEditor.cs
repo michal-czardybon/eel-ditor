@@ -95,16 +95,18 @@ public static class TableEditor
         {
             if (column >= row.Cells.Count) continue;
             var cell = row.Cells[column];
+            // A single cell still needs a pipe to be parsed as a table row.
+            bool keepPipe = table.ColumnCount == 2 && row.Cells.Count == 2 && !row.HasLeadingPipe && !row.Cells[^1].HasClosingPipe;
             if (cell.HasClosingPipe)
             {
                 int start = cell.Start;
                 // First cell of a row without leading pipe: also no pipe before it, just remove "cell|".
-                edits.Add(TableEdit.Replace(row.LineIndex, start, cell.ClosingPipe + 1 - start, ""));
+                edits.Add(TableEdit.Replace(row.LineIndex, start, cell.ClosingPipe + (keepPipe ? 0 : 1) - start, ""));
             }
             else
             {
                 // Last cell without trailing pipe: remove the pipe before it as well.
-                int start = Math.Max(0, cell.Start - 1);
+                int start = keepPipe ? cell.Start : Math.Max(0, cell.Start - 1);
                 edits.Add(TableEdit.Replace(row.LineIndex, start, cell.End - start, ""));
             }
         }

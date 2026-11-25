@@ -89,7 +89,11 @@ public partial class MainWindow : Window
         AddHandler(DragDrop.DragOverEvent, OnDragOver, handledEventsToo: true);
         AddHandler(DragDrop.DropEvent, OnDrop, handledEventsToo: true);
         _monitor.Changed += path => Dispatcher.UIThread.Post(() => OnFileChangedOnDisk(path));
-        Activated += (_, _) => PollFilesOnDisk();
+        Activated += (_, _) =>
+        {
+            PollFilesOnDisk();
+            if (_headComparison is { } comparison) _ = RefreshHeadDiffAsync(comparison.Root);
+        };
         ActualThemeVariantChanged += (_, _) => ApplyThemeToEditor();
         StatusEol.Click += (_, _) => ShowEolMenu(StatusEol);
         StatusEncoding.Click += (_, _) => ShowEncodingMenu(StatusEncoding);
@@ -520,7 +524,7 @@ public partial class MainWindow : Window
             return;
         }
         if (doc.IsLarge && doc.SyntaxOverride is null || doc.SyntaxOverride == EditorDocument.PlainTextSyntax
-            || doc.SyntaxOverride is null && string.IsNullOrEmpty(doc.SyntaxName) && doc.FilePath is null)
+            || doc.SyntaxOverride is null && string.IsNullOrEmpty(doc.SyntaxName) && doc.SyntaxPath is null)
         {
             _textMate.SetGrammar(null);
             if (string.IsNullOrEmpty(doc.SyntaxName) || doc.SyntaxOverride == EditorDocument.PlainTextSyntax) doc.SyntaxName = Loc.T("Syntax.PlainText");
@@ -529,7 +533,7 @@ public partial class MainWindow : Window
         string? scope = null;
         var lang = doc.SyntaxOverride is { } overrideId
             ? _textMateRegistry.GetAvailableLanguages().FirstOrDefault(l => l.Id == overrideId)
-            : doc.FilePath is null ? null : _textMateRegistry.GetLanguageByExtension(Path.GetExtension(doc.FilePath));
+            : doc.SyntaxPath is not { } path ? null : _textMateRegistry.GetLanguageByExtension(Path.GetExtension(path));
         if (lang is not null) scope = _textMateRegistry.GetScopeByLanguageId(lang.Id);
         _textMate.SetGrammar(scope);
         doc.SyntaxName = lang is null ? Loc.T("Syntax.PlainText") : (lang.Aliases?.FirstOrDefault() ?? lang.Id);
@@ -544,6 +548,7 @@ public partial class MainWindow : Window
         _markdown?.Dispose();
         _markdown = null;
         ApplySyntax(doc);
+        SchedulePreview();
         UpdateStatus();
         RefreshCommandStates();
         ScheduleSessionSave();

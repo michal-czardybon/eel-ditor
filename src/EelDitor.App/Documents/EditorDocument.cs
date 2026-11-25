@@ -115,9 +115,13 @@ public sealed partial class EditorDocument : ObservableObject
     public const string PlainTextSyntax = "plaintext";
     public const string MarkdownSyntax = "markdown";
 
+    // A Git revision opened as a copy still uses the original filename to pick its syntax.
+    internal string? RevisionPath { get; init; }
+    internal string? SyntaxPath => FilePath ?? RevisionPath;
+
     public bool IsMarkdown => SyntaxOverride is { } o
         ? o == MarkdownSyntax
-        : FilePath is not null && Path.GetExtension(FilePath).ToLowerInvariant() is ".md" or ".markdown" or ".mdown" or ".mkd";
+        : SyntaxPath is not { } path || Path.GetExtension(path).ToLowerInvariant() is ".md" or ".markdown" or ".mdown" or ".mkd";
 
     // View state restored when the document is shown again.
     public int CaretOffset { get; set; }

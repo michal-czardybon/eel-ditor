@@ -186,6 +186,21 @@ public class TableEditTests
         Assert.Equal("| bb |\n|----|\n| 2 |\n| 4 |", Apply(Table, TableEditor.DeleteColumn(t, 0)));
     }
 
+    [Theory]
+    [InlineData(0, "b", "2")]
+    [InlineData(1, "a", "1")]
+    public void DeleteColumnWithoutOuterPipes_KeepsTheRemainingColumnInATable(int column, string header, string body)
+    {
+        const string source = "a | b\n--- | ---\n1 | 2";
+        var (table, _) = Parse(source);
+        var result = Apply(source, TableEditor.DeleteColumn(table, column));
+        var remaining = Assert.Single(MarkdownDocument.Parse(result).Tables);
+        Assert.Equal(1, remaining.ColumnCount);
+        Assert.Equal(3, remaining.Rows.Count);
+        Assert.Contains(header, result.Split('\n')[0]);
+        Assert.Contains(body, result.Split('\n')[2]);
+    }
+
     [Fact]
     public void InsertAndDeleteRow()
     {
