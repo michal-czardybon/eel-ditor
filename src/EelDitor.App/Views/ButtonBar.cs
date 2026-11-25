@@ -15,13 +15,16 @@ internal static class ButtonBar
 
     /// <summary>
     /// Styles the buttons and puts them into <paramref name="panel"/> (a new one when null); returns the strip that
-    /// holds the panel, to be placed across the whole width.
+    /// holds the panel, to be placed across the whole width. A wrap panel puts buttons that do not fit on a next row.
     /// </summary>
-    public static Border Strip(IReadOnlyList<Button> buttons, StackPanel? panel = null)
+    public static Border Strip(IReadOnlyList<Button> buttons, Panel? panel = null)
     {
         panel ??= new StackPanel();
-        panel.Orientation = Orientation.Horizontal;
-        panel.Spacing = 4;
+        if (panel is StackPanel stack)
+        {
+            stack.Orientation = Orientation.Horizontal;
+            stack.Spacing = 4;
+        }
         foreach (var b in buttons)
         {
             b.FontSize = 12;
@@ -30,9 +33,10 @@ internal static class ButtonBar
             b.Height = Height;
             b.VerticalContentAlignment = VerticalAlignment.Center;
             b.CornerRadius = new CornerRadius(3);
+            if (panel is WrapPanel) b.Margin = new Thickness(0, 2, 4, 2);
             panel.Children.Add(b);
         }
-        return new Border { Child = panel, Padding = new Thickness(6, 4), BorderThickness = new Thickness(0, 1) }
+        return new Border { Child = panel, Padding = new Thickness(6, panel is WrapPanel ? 2 : 4), BorderThickness = new Thickness(0, 1) }
             .Res(Border.BackgroundProperty, "ChromeBrush").Res(Border.BorderBrushProperty, "BorderSubtleBrush");
     }
 }

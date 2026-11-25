@@ -344,6 +344,18 @@ diff-friendly mode.
   blocks. It shows that re-breaking lines changed no words. The word view is always wrapped (one text, nothing to
   align), the change F7 / Shift+F7 went to is outlined, and the bottom line panel is hidden there (the word view shows
   both versions already). Switching between the modes keeps the place (the current block's change, or the caret's line).
+- **Reverting in the word view** (Revert change, Alt+Right, and "Revert this change" on a right click, also side by side):
+  only the change at the caret goes back, exactly as it was, whitespace included — not its whole line, which with one
+  line per paragraph would be the whole paragraph. The word diff keeps, for every change, the range of the new text and
+  the old text that replaces it (`WordRevert`); whole inserted or deleted lines are reverted as lines. It was disabled
+  at first because the word view is one combined text with no sides to copy between.
+- **The word view can be edited** (when the working copy is editable): everything but the removed runs is the new text
+  itself, so an edit there is made in the working copy at the same line and column (its line endings kept) and the
+  word diff follows. Removed runs are not in the file and are read-only; a deletion over them takes only the file's text.
+  The runs are text segments that move with the edits until the diff is computed again after a pause; a recomputed word
+  view with the same text is not replaced, so the caret and the view stay.
+- **The document map follows the comparison**: it shows the working side (or the word view) and marks the changed
+  lines — added green, removed red (a line where lines are missing), changed amber — above the frame of the visible part.
 - **Next / previous change brings the change itself into view:** the caret goes to the block's first changed character
   (the common beginning of the two lines when a line is too long for the character diff) and the view scrolls
   horizontally to it. With one line per paragraph a change is often far to the right; going to the line's start or only
@@ -356,6 +368,18 @@ diff-friendly mode.
 - **Git panel:** unstaged/staged lists, commit message, Rescan / Commit / Push. File context menu: log, diff vs HEAD,
   stage/unstage, revert (with confirmation), remove from repo = `git rm --cached` (the safer variant: the file stays on
   disk). No credentials are requested; push relies on the user's credential manager.
+- **Git panel toolbars**, one per section: Rescan, Stage, Pull above the unstaged list; Unstage, Commit, Push,
+  Console under the "staged" header, followed by the commit message. **Why:** one row of seven buttons usually wrapped,
+  and the split shows what each button acts on. Git's commands keep git's English names in
+  every language (the user's decision: they are the words of git itself); tooltips explain them. Stage / Unstage act on
+  the files selected in the lists below.
+- **Pull never merges**: `git pull --ff-only`. When both the local and the remote branch have new commits nothing changes
+  and the console explains how to join them; no merge commit and no conflict markers appear in the files by surprise.
+  Files the pull changed are reloaded (or reported as changed on disk when they have unsaved edits).
+- **Git console** (like Git GUI's output window): every git command started from the editor (stage, unstage, discard,
+  untrack, commit, push, pull) is shown as typed in a shell, with git's output and whether it succeeded. It opens by
+  itself for push and pull and when a command fails (instead of message boxes); the Console button opens it any time.
+  **Why:** a push that seemed to do nothing gave no feedback at all.
 - **Merge conflicts:** marker blocks highlighted, a bar to move between them and resolve (current / incoming / both),
   then offer `git add`. Git features are disabled outside a repository.
 - `GitService` runs git at below-normal priority, results cached per repository and refreshed after save, on

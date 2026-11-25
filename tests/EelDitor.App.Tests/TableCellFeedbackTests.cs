@@ -357,6 +357,30 @@ public class TableCellFeedbackTests
     }
 
     [AvaloniaFact]
+    public void WhileComparing_TheMapFollowsTheComparison_AndMarksTheChangedLines()
+    {
+        var (w, doc) = Open("jeden\ndwa\ntrzy\ncztery\n", wrap: false, name: "a.txt");
+        w.SideTabs.SelectedItem = w.MapTab;
+        Settle();
+        var map = w.GetVisualDescendants().OfType<DocumentMap>().Single();
+        w.OpenDiff("HEAD", "jeden\nDWA\ntrzy\n", "working", doc.Document, true, null);
+        Settle();
+        var view = w.CurrentDiffView!;
+        Assert.Equal([(1, 1, Core.Diff.DiffKind.Modified), (3, 1, Core.Diff.DiffKind.Inserted)], map.ChangedLines!().ToList());
+
+        w.RunCommand("diff.words");                                    // the word view: its own text and lines
+        Settle();
+        var mapEditor = map.GetVisualDescendants().OfType<AvaloniaEdit.TextEditor>().Single();
+        Assert.Same(view.WordsEditor.Document, mapEditor.Document);
+        Assert.Contains(map.ChangedLines!(), c => c.Line == 1);
+
+        w.CloseDiff();
+        Settle();
+        Assert.Null(map.ChangedLines);
+        Assert.Same(doc.Document, mapEditor.Document);
+    }
+
+    [AvaloniaFact]
     public void NewDocument_WithTextSelected_SwitchesCleanly()
     {
         // The status bar read the old selection's offsets while AvaloniaEdit was switching to the new, empty document;

@@ -18,13 +18,56 @@ public sealed class DocumentMap : Border
 {
     private const double MapFontSize = 2.6;
     private readonly TextEditor _map;
-    private readonly TextEditor _editor;
+    private readonly TextEditor _home;
+    private TextEditor _editor;
     private readonly ViewportRenderer _viewport;
+    private readonly ChangeRenderer _changes;
     private bool _dragging;
+
+    /// <summary>
+    /// While comparing: the changed lines of the followed editor's document (first line from 0, line count — 0 for lines
+    /// removed there — and the kind), drawn on the map; null otherwise.
+    /// </summary>
+    public Func<IEnumerable<(int Line, int Count, Core.Diff.DiffKind Kind)>>? ChangedLines { get; private set; }
+
+    /// <summary>
+    /// The map follows another editor (a comparison's side or word view) and marks its changed lines; null: back to
+    /// the main editor, no marks.
+    /// </summary>
+    public void Follow(TextEditor? editor, Func<IEnumerable<(int Line, int Count, Core.Diff.DiffKind Kind)>>? changedLines = null)
+    {
+        Unhook(_editor);
+        _editor = editor ?? _home;
+        ChangedLines = editor is null ? null : changedLines;
+        Hook(_editor);
+        SetDocument(_editor.Document);
+    }
+
+    /// <summary>The changes were computed again: the marks are redrawn.</summary>
+    public void RefreshChanges() => _map.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
+
+    private void OnEditorScrolled(object? sender, EventArgs e) => Sync();
+
+    private void OnEditorDocumentChanged(object? sender, EventArgs e) => SetDocument(_editor.Document);
+
+    private void Hook(TextEditor editor)
+    {
+        editor.TextArea.TextView.ScrollOffsetChanged += OnEditorScrolled;
+        // Heights in the editor change as lines are measured (tables, wrapped paragraphs): the frame follows.
+        editor.TextArea.TextView.VisualLinesChanged += OnEditorScrolled;
+        editor.DocumentChanged += OnEditorDocumentChanged;
+    }
+
+    private void Unhook(TextEditor editor)
+    {
+        editor.TextArea.TextView.ScrollOffsetChanged -= OnEditorScrolled;
+        editor.TextArea.TextView.VisualLinesChanged -= OnEditorScrolled;
+        editor.DocumentChanged -= OnEditorDocumentChanged;
+    }
 
     public DocumentMap(TextEditor editor)
     {
-        _editor = editor;
+        _editor = _home = editor;
         ClipToBounds = true;
         Cursor = new Cursor(StandardCursorType.Hand);
         _map = new TextEditor
@@ -43,14 +86,14 @@ public sealed class DocumentMap : Border
         _map.Options.EnableHyperlinks = false;
         _map.Options.HighlightCurrentLine = false;
         _viewport = new ViewportRenderer(this);
+        _changes = new ChangeRenderer(this);
+        // The changes over the frame of the visible part, so a change on screen is still marked.
         _map.TextArea.TextView.BackgroundRenderers.Add(_viewport);
+        _map.TextArea.TextView.BackgroundRenderers.Add(_changes);
         _map.TextArea.Caret.CaretBrush = Brushes.Transparent;
         Child = _map;
 
-        editor.TextArea.TextView.ScrollOffsetChanged += (_, _) => Sync();
-        // Heights in the editor change as lines are measured (tables, wrapped paragraphs): the frame follows.
-        editor.TextArea.TextView.VisualLinesChanged += (_, _) => Sync();
-        editor.DocumentChanged += (_, _) => SetDocument(editor.Document);
+        Hook(editor);
         SizeChanged += (_, _) => Sync();
         SetDocument(editor.Document);
     }
@@ -67,6 +110,7 @@ public sealed class DocumentMap : Border
         _map.Background = palette.Background;
         _map.Foreground = palette.LineNumbers;
         _viewport.Brush = palette.Selection;
+        _changes.Palette = palette;
         _map.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
     }
 
@@ -193,6 +237,41 @@ public sealed class DocumentMap : Border
         base.OnPointerWheelChanged(e);
         _editor.SetVerticalOffset(Math.Max(0, _editor.VerticalOffset - e.Delta.Y * _editor.TextArea.TextView.DefaultLineHeight * 3));
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// While comparing: changed lines as bands across the map (added green, removed red, changed amber) with a solid
+    /// strip at the left edge, so they stand out even where a line is one pixel high; removed lines as a red line.
+    /// </summary>
+    private sealed class ChangeRenderer(DocumentMap map) : IBackgroundRenderer
+    {
+        public EditorPalette? Palette { get; set; }
+
+        public KnownLayer Layer => KnownLayer.Background;
+
+        private static IBrush Strong(IBrush brush, byte alpha) =>
+            brush is ISolidColorBrush s ? new SolidColorBrush(Color.FromArgb(alpha, s.Color.R, s.Color.G, s.Color.B)) : brush;
+
+        public void Draw(TextView textView, DrawingContext dc)
+        {
+            if (map.ChangedLines?.Invoke() is not { } changes || Palette is not { } p || textView.Document is not { } doc) return;
+            double width = textView.Bounds.Width, scroll = textView.VerticalOffset;
+            double Top(int line) => line >= doc.LineCount ? textView.DocumentHeight : textView.GetVisualTopByDocumentLine(line + 1);
+            foreach (var (line, count, kind) in changes)
+            {
+                var color = kind switch
+                {
+                    Core.Diff.DiffKind.Inserted => p.DiffAddedInline,
+                    Core.Diff.DiffKind.Deleted => p.DiffRemovedInline,
+                    _ => p.DiffChanged,
+                };
+                double top = Top(Math.Max(0, line)) - scroll;
+                double height = count == 0 ? 0 : Math.Max(2, Top(line + count) - Top(line));
+                if (count == 0) { dc.FillRectangle(Strong(color, 0xE0), new Rect(0, top - 1, width, 2)); continue; }
+                dc.FillRectangle(Strong(color, 0x70), new Rect(0, top, width, height));
+                dc.FillRectangle(Strong(color, 0xFF), new Rect(0, top, 3, height));
+            }
+        }
     }
 
     /// <summary>Paints the part of the document that is visible in the editor.</summary>

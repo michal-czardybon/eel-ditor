@@ -155,8 +155,7 @@ public partial class MainWindow
     {
         if (doc.FilePath is null || GitService.FindRoot(doc.FilePath) is not { } root) return;
         if (doc.IsDirty && !await SaveAsync(doc)) return;
-        var r = await GitService.StageAsync(root, [GitService.RelativePath(root, doc.FilePath)]);
-        if (r.ExitCode != 0) await Dialogs.Info(this, "git", r.Error.Trim());
+        await GitService.StageAsync(root, [GitService.RelativePath(root, doc.FilePath)]); // a failure opens the git console
         await RefreshGitAsync(root);
         UpdateConflictBar();
     }

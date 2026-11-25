@@ -108,8 +108,8 @@ public class ToolbarAndViewTests
         Assert.True(view.WordsEditor.IsVisible);
         Assert.False(view.RightEditor.IsVisible);
         Assert.Equal("ala ma kotapsa\nbez zmian\n", view.WordsEditor.Document.Text);
-        Assert.True(view.WordsEditor.IsReadOnly);
-        Assert.False(ToolButton(w, Loc.T("Diff.RevertChange"))!.IsEnabled); // no reverting in word mode
+        Assert.False(view.WordsEditor.IsReadOnly);                       // the working copy can be edited in the word view
+        Assert.True(ToolButton(w, Loc.T("Diff.RevertChange"))!.IsEnabled);  // reverting works in word mode too
 
         doc.Document.Insert(0, "Hej ");  // the working copy changes: the word diff follows
         Pump(700);

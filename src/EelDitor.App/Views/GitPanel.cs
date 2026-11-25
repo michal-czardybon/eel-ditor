@@ -34,7 +34,8 @@ public sealed record GitRow(GitEntry Entry, bool Staged)
 
 /// <summary>
 /// Sidebar tab with the git changes of the repository of the current file: unstaged and staged lists
-/// (click shows the change in the comparison view), commit message, and Rescan / Commit / Push.
+/// (click shows the change in the comparison view). Each list has the actions that belong to it above it; the commit
+/// message and Commit / Push are in the staged section.
 /// </summary>
 public sealed class GitPanel : DockPanel
 {
@@ -53,6 +54,9 @@ public sealed class GitPanel : DockPanel
     private readonly TextBlock _info = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(8, 4) };
     private readonly Button _commit = new() { Content = Loc.T("Git.Commit"), Classes = { "accent" } };
     private readonly Button _push = new() { Content = Loc.T("Git.Push") };
+    private readonly Button _pull = new() { Content = Loc.T("Git.Pull") };
+    private readonly Button _stage = new() { Content = Loc.T("Git.StageButton"), IsEnabled = false };
+    private readonly Button _unstage = new() { Content = Loc.T("Git.UnstageButton"), IsEnabled = false };
     private readonly Grid _body;
 
     public GitPanel()
@@ -66,25 +70,41 @@ public sealed class GitPanel : DockPanel
         ToolTip.SetTip(_commit, "Ctrl+Enter");
         _commit.Click += (_, _) => RequestCommit();
         _push.Click += (_, _) => PushRequested?.Invoke();
+        ToolTip.SetTip(_push, Loc.T("Git.PushTip"));
+        _pull.Click += (_, _) => PullRequested?.Invoke();
+        ToolTip.SetTip(_pull, Loc.T("Git.PullTip"));
+        // Stage / Unstage act on the files selected in the lists below.
+        _stage.Click += (_, _) => { if (Rows(_unstaged) is { Count: > 0 } rows) StageRequested?.Invoke(rows); };
+        ToolTip.SetTip(_stage, Loc.T("Git.StageTip"));
+        _unstage.Click += (_, _) => { if (Rows(_staged) is { Count: > 0 } rows) UnstageRequested?.Invoke(rows); };
+        ToolTip.SetTip(_unstage, Loc.T("Git.UnstageTip"));
+        var console = new Button { Content = Loc.T("Git.Console") };
+        ToolTip.SetTip(console, Loc.T("Git.ConsoleTip"));
+        console.Click += (_, _) => ConsoleRequested?.Invoke();
 
-        // The repository, then the actions as a mini toolbar across the panel, then the commit message.
+        // The repository, then the two sections, each with its own actions as a mini toolbar across the panel.
         var top = new StackPanel { Margin = new Thickness(8, 8, 8, 6), Spacing = 4 };
         top.Children.Add(_repo);
         top.Children.Add(_branch);
         SetDock(top, Dock.Top);
         Children.Add(top);
-        var actions = ButtonBar.Strip([rescan, _commit, _push]);
+        // Git's own words for its commands (Stage, Commit, Push…), in every language; the tooltips explain them.
+        var actions = ButtonBar.Strip([rescan, _stage, _pull], new WrapPanel());
         SetDock(actions, Dock.Top);
         Children.Add(actions);
         _message.Margin = new Thickness(8, 6, 8, 4);
-        SetDock(_message, Dock.Top);
-        Children.Add(_message);
+        var commitArea = new StackPanel();
+        commitArea.Children.Add(ButtonBar.Strip([_unstage, _commit, _push, console], new WrapPanel()));
+        commitArea.Children.Add(_message);
         SetDock(_info, Dock.Bottom);
         Children.Add(_info);
 
-        _body = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto,*") };
+        // Narrower than the usual toolbar buttons, so each row fits in the default sidebar width.
+        foreach (var b in new[] { rescan, _stage, _pull, _unstage, _commit, _push, console }) b.Padding = new Thickness(7, 0);
+        // Unstaged header and list; staged header, its actions with the commit message, and list.
+        _body = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto,Auto,*") };
         AddSection(0, _unstagedHeader, "Git.StageAll", () => StageRequested?.Invoke(Rows(_unstaged, all: true)), _unstaged);
-        AddSection(2, _stagedHeader, "Git.UnstageAll", () => UnstageRequested?.Invoke(Rows(_staged, all: true)), _staged);
+        AddSection(2, _stagedHeader, "Git.UnstageAll", () => UnstageRequested?.Invoke(Rows(_staged, all: true)), _staged, commitArea);
         Children.Add(_body);
 
         _message.KeyDown += (_, e) =>
@@ -98,6 +118,8 @@ public sealed class GitPanel : DockPanel
     public event Action? RescanRequested;
     public event Action<string>? CommitRequested;
     public event Action? PushRequested;
+    public event Action? PullRequested;
+    public event Action? ConsoleRequested;
     public event Action<GitRow>? ShowChangesRequested;
     public event Action<GitRow>? OpenRequested;
     public event Action<IReadOnlyList<GitRow>>? StageRequested;
@@ -114,7 +136,7 @@ public sealed class GitPanel : DockPanel
         Root = status?.Root;
         _body.IsVisible = status is not null;
         _commit.IsEnabled = status?.Entries.Any(e => e.HasStaged) == true;
-        _push.IsEnabled = status is not null;
+        _push.IsEnabled = _pull.IsEnabled = status is not null;
         if (status is null)
         {
             _repo.FullPath = Loc.T("Git.NoRepository");
@@ -136,10 +158,28 @@ public sealed class GitPanel : DockPanel
         _staged.ItemsSource = staged;
         _unstagedHeader.Text = Loc.T("Git.Unstaged", unstaged.Count);
         _stagedHeader.Text = Loc.T("Git.Staged", staged.Count);
+        UpdateStageButtons();
         if (info is not null) _info.Text = info;
     }
 
     public void SetInfo(string text) => _info.Text = text;
+
+    private void UpdateStageButtons()
+    {
+        _stage.IsEnabled = _unstaged.SelectedItems?.Count > 0;
+        _unstage.IsEnabled = _staged.SelectedItems?.Count > 0;
+    }
+
+    /// <summary>Selects rows of a list (tests).</summary>
+    internal void SelectRows(bool staged, Func<GitRow, bool> which)
+    {
+        var list = staged ? _staged : _unstaged;
+        list.SelectedItems?.Clear();
+        foreach (var r in (list.ItemsSource as IEnumerable<GitRow>) ?? []) if (which(r)) list.SelectedItems?.Add(r);
+    }
+
+    internal Button StageButton => _stage;
+    internal Button UnstageButton => _unstage;
 
     public void FocusMessage() => _message.Focus();
 
@@ -153,7 +193,7 @@ public sealed class GitPanel : DockPanel
     private static IReadOnlyList<GitRow> Rows(ListBox list, bool all = false) =>
         all ? (list.ItemsSource as IEnumerable<GitRow>)?.ToList() ?? [] : list.SelectedItems?.OfType<GitRow>().ToList() ?? [];
 
-    private void AddSection(int row, TextBlock header, string allKey, Action all, ListBox list)
+    private void AddSection(int row, TextBlock header, string allKey, Action all, ListBox list, Control? tools = null)
     {
         var allButton = new Button { Content = Loc.T(allKey), FontSize = 11, Padding = new Thickness(6, 1), Background = Brushes.Transparent };
         allButton.Click += (_, _) => all();
@@ -162,12 +202,18 @@ public sealed class GitPanel : DockPanel
         head.Children.Add(allButton);
         head.Children.Add(header);
         Grid.SetRow(head, row);
-        Grid.SetRow(list, row + 1);
+        if (tools is not null)
+        {
+            Grid.SetRow(tools, row + 1);
+            _body.Children.Add(tools);
+        }
+        Grid.SetRow(list, tools is null ? row + 1 : row + 2);
         _body.Children.Add(head);
         _body.Children.Add(list);
 
         list.SelectionChanged += (_, _) =>
         {
+            UpdateStageButtons();
             if (list.SelectedItems?.Count == 1 && list.SelectedItem is GitRow r) ShowChangesRequested?.Invoke(r);
         };
         list.DoubleTapped += (_, _) => { if (list.SelectedItem is GitRow r) OpenRequested?.Invoke(r); };

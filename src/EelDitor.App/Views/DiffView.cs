@@ -21,7 +21,7 @@ namespace EelDitor.App.Views;
 /// recomputed as you type) or read-only text (HEAD, the version on disk, a commit). Changes can be copied between
 /// the sides block by block or all at once, like in WinMerge. Scrolling is synchronized through the diff's line mapping.
 /// </summary>
-public sealed class DiffView : Grid
+public sealed partial class DiffView : Grid
 {
     private readonly TextEditor _left;
     private readonly TextEditor _right;
@@ -119,6 +119,8 @@ public sealed class DiffView : Grid
         _right.TextArea.GotFocus += (_, _) => { _leftActive = false; InvalidateBlocks(); };
         _left.TextArea.Caret.PositionChanged += (_, _) => { if (_leftActive) InvalidateBlocks(); };
         _right.TextArea.Caret.PositionChanged += (_, _) => { if (!_leftActive) InvalidateBlocks(); };
+
+        foreach (var e in new[] { _left, _right, _words }) AddChangeMenu(e);
 
         _recompute = new DispatcherTimer(TimeSpan.FromMilliseconds(300), DispatcherPriority.Background, async (_, _) => await RecomputeAsync());
         leftDocument.Changed += OnDocumentChanged;
@@ -270,17 +272,6 @@ public sealed class DiffView : Grid
     }
 
     private void ComputeWords() => ShowWords(WordDiff.Compute(_left.Document.Text, _right.Document.Text));
-
-    private void ShowWords(WordDiffResult result)
-    {
-        int caret = _words.CaretOffset;
-        double offset = _words.VerticalOffset;
-        _wordDiff = result;
-        _currentChange = -1;
-        _words.Document = ReadOnlyDocument(result.Text);
-        _words.CaretOffset = Math.Min(caret, _words.Document.TextLength);
-        _words.SetVerticalOffset(offset);
-    }
 
     /// <summary>Left is a base version (HEAD, disk, commit) and right the working copy: copying right = reverting.</summary>
     public bool LeftIsBase { get; }
@@ -499,6 +490,108 @@ public sealed class DiffView : Grid
         MoveCaret(editor, _leftActive ? b.OldStart : b.NewStart);
     }
 
+    /// <summary>Where change <paramref name="index"/> of the word view starts and ends (its touching runs together).</summary>
+    private (int Start, int End) ChangeExtent(WordDiffResult w, int index)
+    {
+        int start = w.Changes[index], end = start;
+        foreach (var span in w.Spans)
+        {
+            if (span.End <= start) continue;
+            if (span.Start > end) break;
+            end = Math.Max(end, span.End);
+        }
+        return (start, end);
+    }
+
+    /// <summary>The word view's change at the caret (or the one F7 went to, when the caret is still there), or -1.</summary>
+    internal int CurrentWordChange
+    {
+        get
+        {
+            if (!_wordMode || _wordDiff is not { } w) return -1;
+            int caret = _words.CaretOffset;
+            if (_currentChange >= 0 && _currentChange < w.Changes.Count)
+            {
+                var (s, e) = ChangeExtent(w, _currentChange);
+                if (caret >= s && caret <= e) return _currentChange;
+            }
+            for (int i = 0; i < w.Changes.Count; i++)
+            {
+                var (s, e) = ChangeExtent(w, i);
+                if (caret >= s && caret <= e) return i;
+                if (s > caret) break;
+            }
+            return -1;
+        }
+    }
+
+    /// <summary>
+    /// "Revert change": the current block (side by side) or the change at the caret (word view) becomes as in the
+    /// left, base version. In the word view only that change goes back, exactly as it was (whitespace too), not its
+    /// whole line or paragraph. False when there is nothing to revert there.
+    /// </summary>
+    public bool RevertCurrentChange()
+    {
+        if (_closed || !RightEditable) return false;
+        if (!_wordMode)
+        {
+            if (CurrentBlock < 0) return false;
+            CopyBlock(toRight: true);
+            return true;
+        }
+        if (_wordDiff is not { } w || CurrentWordChange is not (>= 0 and var index) || index >= w.Reverts.Count) return false;
+        var r = w.Reverts[index];
+        var doc = _right.Document;
+        if (r.Lines is { } b) ReplaceLines(_left.Document, b.OldStart, b.OldCount, doc, b.NewStart, b.NewCount);
+        else
+        {
+            int Offset(int line, int column)
+            {
+                var l = doc.GetLineByNumber(Math.Clamp(line + 1, 1, doc.LineCount));
+                return l.Offset + Math.Min(column, l.Length);
+            }
+            int start = Offset(r.Line, r.Column), end = Offset(r.EndLine, r.EndColumn);
+            string nl = TextUtilities.GetNewLineFromDocument(doc, Math.Clamp(r.Line + 1, 1, doc.LineCount));
+            doc.Replace(start, Math.Max(0, end - start), r.OldText.Replace("\n", nl));
+        }
+        int at = w.Changes[index];
+        RecomputeNow();
+        // Stay where the change was; F7 moves on to the next one.
+        _currentChange = -1;
+        _words.CaretOffset = Math.Min(at, _words.Document.TextLength);
+        _words.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
+        return true;
+    }
+
+    /// <summary>A right click moves the caret to the clicked place first, so the menu acts on the change there.</summary>
+    private void AddChangeMenu(TextEditor editor)
+    {
+        editor.TextArea.AddHandler(PointerPressedEvent, (_, e) =>
+        {
+            if (!e.GetCurrentPoint(editor.TextArea).Properties.IsRightButtonPressed) return;
+            if (editor.GetPositionFromPoint(e.GetPosition(editor)) is not { } pos) return;
+            int offset = editor.Document.GetOffset(pos.Location);
+            var sel = editor.TextArea.Selection;
+            if (sel.IsEmpty || !sel.Contains(offset)) editor.TextArea.Caret.Position = pos;
+            if (ReferenceEquals(editor, _left)) _leftActive = true;
+            else if (ReferenceEquals(editor, _right)) _leftActive = false;
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        var revert = new MenuItem { Header = Loc.T("Diff.RevertThisChange") };
+        ToolTip.SetTip(revert, Loc.T("Diff.RevertChangeTip"));
+        revert.Click += (_, _) => RevertCurrentChange();
+        var copy = new MenuItem { Header = Loc.T("Menu.Edit.Copy") };
+        copy.Click += (_, _) => editor.Copy();
+        var menu = new ContextMenu { Items = { revert, new Separator(), copy } };
+        void Update()
+        {
+            revert.IsEnabled = LeftIsBase && RightEditable && (_wordMode ? CurrentWordChange >= 0 : CurrentBlock >= 0);
+            copy.IsEnabled = editor.SelectionLength > 0;
+        }
+        menu.Opening += (_, _) => Update();
+        menu.Opened += (_, _) => Update();
+        editor.ContextMenu = menu;
+    }
+
     /// <summary>The side Undo/Redo act on: the focused editable side, else the editable one.</summary>
     private TextEditor? UndoTarget =>
         _leftActive && LeftEditable ? _left : RightEditable ? _right : LeftEditable ? _left : null;
@@ -620,13 +713,12 @@ public sealed class DiffView : Grid
     {
         protected override void ColorizeLine(DocumentLine line)
         {
-            if (view._wordDiff is not { } w) return;
+            if (view._wordDiff is null) return;
             int start = line.Offset, end = line.EndOffset;
-            foreach (var s in w.Spans)
+            // The runs as text segments: they follow edits made in the word view until the diff is computed again.
+            foreach (var s in view.RunsIn(start, line.Length))
             {
-                if (s.End <= start) continue;
-                if (s.Start >= end) break;
-                int a = Math.Max(s.Start, start), b = Math.Min(s.End, end);
+                int a = Math.Max(s.StartOffset, start), b = Math.Min(s.EndOffset, end);
                 if (b <= a) continue;
                 bool deleted = s.Kind == WordChange.Deleted;
                 ChangeLinePart(a, b, el =>
@@ -647,13 +739,7 @@ public sealed class DiffView : Grid
         {
             if (!view._wordMode || view._wordDiff is not { } w || view._currentChange < 0 || view._currentChange >= w.Changes.Count
                 || !textView.VisualLinesValid || textView.Document is null) return;
-            int start = w.Changes[view._currentChange], end = start;
-            foreach (var span in w.Spans)
-            {
-                if (span.End <= start) continue;
-                if (span.Start > end) break;
-                end = Math.Max(end, span.End);
-            }
+            var (start, end) = view.ChangeExtent(w, view._currentChange);
             end = Math.Min(end, textView.Document.TextLength);
             if (end <= start) return;
             var builder = new BackgroundGeometryBuilder { CornerRadius = 2 };

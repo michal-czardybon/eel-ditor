@@ -323,12 +323,14 @@ public partial class MainWindow
         Add("wrap.split120", "Wrap.Split120", () => { if (_active is not null) WrapLongLines(_active, Core.Text.WrapMode.Width120); }, null, () => _active is not null && !Editor.IsReadOnly);
         Add("wrap.splitSentences", "Wrap.SplitSentences", () => { if (_active is not null) WrapLongLines(_active, Core.Text.WrapMode.Sentences); }, null, () => _active is not null && !Editor.IsReadOnly);
         Add("wrap.reflow", "Wrap.Reflow", ReflowParagraphs, ["Alt+Q"], () => _active is not null && !Editor.IsReadOnly, tooltipKey: "Wrap.ReflowTip");
-        Add("diff.revert", "Diff.RevertChange", () => _diffView?.CopyBlock(toRight: true), null, () => _diffView is { RightEditable: true, WordMode: false }, tooltipKey: "Diff.RevertChangeTip");
+        // In the word view too: there the change at the caret goes back (only it, not its whole line).
+        Add("diff.revert", "Diff.RevertChange", () => _diffView?.RevertCurrentChange(), null, () => _diffView is { RightEditable: true }, tooltipKey: "Diff.RevertChangeTip");
         // Whole-file operations work in the word view too; single blocks only in the side-by-side one.
         Add("diff.revertAll", "Diff.RevertAll", () => _diffView?.CopyAll(toRight: true), null, () => _diffView is { RightEditable: true }, tooltipKey: "Diff.RevertAllTip");
         Add("diff.next", "Menu.Compare.NextChange", () => _diffView?.GoToChange(1), ["F7", "Alt+Down"], () => _diffView is not null);
         Add("diff.prev", "Menu.Compare.PrevChange", () => _diffView?.GoToChange(-1), ["Shift+F7", "Alt+Up"], () => _diffView is not null);
-        Add("diff.copyRight", "Menu.Compare.CopyRight", () => _diffView?.CopyBlock(toRight: true), ["Alt+Right"], () => _diffView is { RightEditable: true, WordMode: false });
+        Add("diff.copyRight", "Menu.Compare.CopyRight", () => { if (_diffView is { WordMode: true } words) words.RevertCurrentChange(); else _diffView?.CopyBlock(toRight: true); },
+            ["Alt+Right"], () => _diffView is { RightEditable: true });
         Add("diff.copyLeft", "Menu.Compare.CopyLeft", () => _diffView?.CopyBlock(toRight: false), ["Alt+Left"], () => _diffView is { LeftEditable: true, WordMode: false });
         Add("diff.copyAllRight", "Menu.Compare.CopyAllRight", () => _diffView?.CopyAll(toRight: true), null, () => _diffView is { RightEditable: true });
         Add("diff.copyAllLeft", "Menu.Compare.CopyAllLeft", () => _diffView?.CopyAll(toRight: false), null, () => _diffView is { LeftEditable: true });

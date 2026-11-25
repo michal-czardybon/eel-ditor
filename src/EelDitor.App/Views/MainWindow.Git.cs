@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Threading;
 using Avalonia.Interactivity;
 using AvaloniaEdit.Document;
 using EelDitor.App.Documents;
@@ -35,6 +36,14 @@ public partial class MainWindow
         panel.OpenRequested += row => _ = OpenFileAsync(row.Entry.FullPath);
         panel.CommitRequested += message => _ = CommitAsync(message);
         panel.PushRequested += () => _ = PushAsync();
+        panel.PullRequested += () => _ = PullAsync();
+        panel.ConsoleRequested += ShowGitConsole;
+        // Static events: this window stops listening when it closes.
+        Action<GitService.Command> started = c => Dispatcher.UIThread.Post(() => OnGitCommand(c, finished: false));
+        Action<GitService.Command> finished = c => Dispatcher.UIThread.Post(() => OnGitCommand(c, finished: true));
+        GitService.CommandStarted += started;
+        GitService.CommandFinished += finished;
+        Closed += (_, _) => { GitService.CommandStarted -= started; GitService.CommandFinished -= finished; _gitConsole?.Close(); };
         GitHost.Child = panel;
         // SelectionChanged bubbles: a click in a list inside a tab (e.g. the Git panel) must not count as a tab change.
         SideTabs.SelectionChanged += (_, e) => { if (ReferenceEquals(e.Source, SideTabs) && ReferenceEquals(SideTabs.SelectedItem, GitTab)) UpdateGitPanel(rescan: true); };
@@ -108,8 +117,7 @@ public partial class MainWindow
     private async Task GitOnRowsAsync(IReadOnlyList<GitRow> rows, Func<string, IEnumerable<string>, Task<GitService.Result>> op)
     {
         if (rows.Count == 0 || _gitPanel?.Root is not { } root) return;
-        var r = await op(root, rows.Select(x => x.Entry.RelativePath));
-        if (r.ExitCode != 0) await Dialogs.Info(this, "git", r.Error.Trim());
+        await op(root, rows.Select(x => x.Entry.RelativePath)); // a failure opens the git console
         await RefreshGitAsync(root);
     }
 
@@ -130,11 +138,7 @@ public partial class MainWindow
             return;
         _gitPanel.SetInfo(Loc.T("Git.Committing"));
         var r = await GitService.CommitAsync(root, message);
-        if (r.ExitCode != 0)
-        {
-            _gitPanel.SetInfo("");
-            await Dialogs.Info(this, "git commit", (r.Error + Environment.NewLine + System.Text.Encoding.UTF8.GetString(r.Output)).Trim());
-        }
+        if (r.ExitCode != 0) _gitPanel.SetInfo(Loc.T("Git.Failed")); // the git console shows why
         else
         {
             _gitPanel.CommitMessage = "";
@@ -143,19 +147,75 @@ public partial class MainWindow
         await RefreshGitAsync(root);
     }
 
+    /// <summary>Push: the git console opens and shows what git says (where it went, or why it failed).</summary>
     private async Task PushAsync()
     {
         if (_gitPanel?.Root is not { } root) return;
         _gitPanel.SetInfo(Loc.T("Git.Pushing"));
+        ShowGitConsole();
         var r = await GitService.PushAsync(root);
-        string output = (r.Error + Environment.NewLine + System.Text.Encoding.UTF8.GetString(r.Output)).Trim();
-        if (r.ExitCode != 0)
-        {
-            _gitPanel.SetInfo("");
-            await Dialogs.Info(this, "git push", output);
-        }
-        else _gitPanel.SetInfo(Loc.T("Git.Pushed"));
+        _gitPanel.SetInfo(Loc.T(r.ExitCode == 0 ? "Git.Pushed" : "Git.Failed"));
         await RefreshGitAsync(root);
+    }
+
+    /// <summary>
+    /// Pull without merging (fast-forward only), so it never leaves conflicts in the files: when both sides have new
+    /// commits, git changes nothing and the console says what to do. Files changed by the pull are reloaded (or, when
+    /// they have unsaved changes, reported as changed on disk).
+    /// </summary>
+    private async Task PullAsync()
+    {
+        if (_gitPanel?.Root is not { } root) return;
+        if (_files.Documents.Any(d => d.IsDirty && d.FilePath?.StartsWith(root, StringComparison.OrdinalIgnoreCase) == true)
+            && await Dialogs.Ask(this, "git pull", Loc.T("Git.UnsavedBeforePull"), Loc.T("Git.Pull"), Loc.T("Button.Cancel")) != 0)
+            return;
+        _gitPanel.SetInfo(Loc.T("Git.Pulling"));
+        ShowGitConsole();
+        var r = await GitService.PullAsync(root);
+        _gitPanel.SetInfo(Loc.T(r.ExitCode == 0 ? "Git.Pulled" : "Git.Failed"));
+        PollFilesOnDisk();
+        await RefreshGitAsync(root);
+    }
+
+    // ---------------------------------------------------------------- git console
+
+    private readonly List<GitService.Command> _gitCommands = [];
+    private GitConsoleWindow? _gitConsole;
+
+    /// <summary>The git console window, when open (tests).</summary>
+    internal GitConsoleWindow? GitConsole => _gitConsole;
+
+    private void OnGitCommand(GitService.Command command, bool finished)
+    {
+        // Only commands for this window's repositories (the event is static: every window hears every command).
+        if (!IsVisible || !ShowsRepository(command.Root)) return;
+        if (!finished) _gitCommands.Add(command);
+        if (_gitCommands.Count > 200) _gitCommands.RemoveRange(0, _gitCommands.Count - 200);
+        // A command that failed always shows why.
+        if (finished && command.Result is { ExitCode: not 0 }) ShowGitConsole();
+        _gitConsole?.Refresh();
+    }
+
+    /// <summary>Whether the Git tab shows this repository or one of the open files is in it.</summary>
+    private bool ShowsRepository(string root)
+    {
+        static string Norm(string p) => Path.GetFullPath(p).TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
+        string r = Norm(root);
+        return _gitPanel?.Root is { } shown && string.Equals(Norm(shown), r, StringComparison.OrdinalIgnoreCase)
+            || _files.Documents.Any(d => d.FilePath?.StartsWith(r, StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    /// <summary>A hint under a failed pull: it only fast-forwards, so diverged branches need the user's decision.</summary>
+    private static string? GitNote(GitService.Command command) =>
+        command.Result is { ExitCode: not 0 } && command.CommandLine.StartsWith("git pull", StringComparison.Ordinal) ? Loc.T("Git.PullHint") : null;
+
+    private void ShowGitConsole()
+    {
+        if (!IsVisible) return;
+        if (_gitConsole is { } open) { open.Refresh(); open.Activate(); return; }
+        var window = _gitConsole = new GitConsoleWindow(_gitCommands, GitNote, () => _gitCommands.Clear());
+        window.Closed += (_, _) => _gitConsole = null;
+        window.Show(this);
     }
 
     /// <summary>
@@ -215,11 +275,7 @@ public partial class MainWindow
             mi.Click += async (_, _) => { await action(); await RefreshGitAsync(root); };
             return mi;
         }
-        async Task Run(Task<GitService.Result> op)
-        {
-            var r = await op;
-            if (r.ExitCode != 0) await Dialogs.Info(this, "git", r.Error.Trim());
-        }
+        static async Task Run(Task<GitService.Result> op) => await op; // a failure opens the git console
         var entry = _gitStatus.GetValueOrDefault(root)?.Entries.FirstOrDefault(e => string.Equals(e.FullPath, path, StringComparison.OrdinalIgnoreCase));
         bool untracked = letter == "?";
         bool tracked = !untracked;

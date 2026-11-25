@@ -142,19 +142,58 @@ public static class GitService
         return r.ExitCode == 0;
     }
 
-    public static Task<Result> StageAsync(string root, IEnumerable<string> paths) => Run(root, ["add", "--", .. paths], CancellationToken.None);
+    public static Task<Result> StageAsync(string root, IEnumerable<string> paths) => RunLogged(root, ["add", "--", .. paths]);
 
-    public static Task<Result> UnstageAsync(string root, IEnumerable<string> paths) => Run(root, ["restore", "--staged", "--", .. paths], CancellationToken.None);
+    public static Task<Result> UnstageAsync(string root, IEnumerable<string> paths) => RunLogged(root, ["restore", "--staged", "--", .. paths]);
 
     /// <summary>Discards unstaged changes (the work tree gets the staged/HEAD version back).</summary>
-    public static Task<Result> DiscardAsync(string root, IEnumerable<string> paths) => Run(root, ["restore", "--worktree", "--", .. paths], CancellationToken.None);
+    public static Task<Result> DiscardAsync(string root, IEnumerable<string> paths) => RunLogged(root, ["restore", "--worktree", "--", .. paths]);
 
     /// <summary>Stops tracking the files but keeps them on disk.</summary>
-    public static Task<Result> UntrackAsync(string root, IEnumerable<string> paths) => Run(root, ["rm", "--cached", "--quiet", "--", .. paths], CancellationToken.None);
+    public static Task<Result> UntrackAsync(string root, IEnumerable<string> paths) => RunLogged(root, ["rm", "--cached", "--quiet", "--", .. paths]);
 
-    public static Task<Result> CommitAsync(string root, string message) => Run(root, ["commit", "-m", message], CancellationToken.None);
+    public static Task<Result> CommitAsync(string root, string message) => RunLogged(root, ["commit", "-m", message]);
 
-    public static Task<Result> PushAsync(string root, CancellationToken ct = default) => Run(root, ["push"], ct);
+    public static Task<Result> PushAsync(string root, CancellationToken ct = default) => RunLogged(root, ["push"], ct);
+
+    /// <summary>
+    /// Pull that never merges: only a fast-forward (<c>--ff-only</c>). When the local branch and the remote one both
+    /// have new commits, nothing changes and git says so; no merge commit, no conflicts in the files.
+    /// </summary>
+    public static Task<Result> PullAsync(string root, CancellationToken ct = default) => RunLogged(root, ["pull", "--ff-only"], ct);
+
+    /// <summary>A git command the user started (stage, commit, push…), for the console: what ran and what it said.</summary>
+    public sealed class Command(string root, string commandLine)
+    {
+        public string Root { get; } = root;
+        public string CommandLine { get; } = commandLine;
+        public DateTime Started { get; } = DateTime.Now;
+
+        /// <summary>Null while it runs.</summary>
+        public Result? Result { get; internal set; }
+    }
+
+    /// <summary>Raised when a command the user started begins and when it ends (on the thread that awaits it).</summary>
+    public static event Action<Command>? CommandStarted, CommandFinished;
+
+    private static async Task<Result> RunLogged(string root, IReadOnlyList<string> args, CancellationToken ct = default)
+    {
+        var command = new Command(root, "git " + string.Join(' ', args.Select(Quote)));
+        CommandStarted?.Invoke(command);
+        Result r;
+        try { r = await Run(root, args, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+        {
+            r = new Result(-1, [], ex.Message);
+        }
+        command.Result = r;
+        CommandFinished?.Invoke(command);
+        return r;
+    }
+
+    /// <summary>An argument as typed in a shell (quoted when it has spaces or quotes).</summary>
+    private static string Quote(string arg) =>
+        arg.Length > 0 && !arg.Any(c => char.IsWhiteSpace(c) || c is '"' or '\'') ? arg : "\"" + arg.Replace("\"", "\\\"") + "\"";
 
     /// <summary>File contents at a revision (e.g. "HEAD", ":" for the index, or a commit hash); null if absent.</summary>
     public static async Task<byte[]?> ShowAsync(string root, string revision, string relativePath, CancellationToken ct = default)

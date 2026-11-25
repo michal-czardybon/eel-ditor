@@ -12,6 +12,13 @@ public readonly record struct WordSpan(int Start, int Length, WordChange Kind)
     public int End => Start + Length;
 }
 
+/// <summary>
+/// How to take one change of the word diff back in the new text: replace the new text from (Line, Column) to
+/// (EndLine, EndColumn) — lines of the new text, 0-based, without line ends — with <see cref="OldText"/> (lines joined
+/// with "\n"); or, for whole changed lines (<see cref="Lines"/> set), put back those lines of the old text.
+/// </summary>
+public sealed record WordRevert(DiffBlock? Lines, int Line, int Column, int EndLine, int EndColumn, string OldText);
+
 /// <summary>One text with the old and the new words of every change side by side, like <c>git diff --word-diff</c>.</summary>
 public sealed class WordDiffResult
 {
@@ -20,6 +27,9 @@ public sealed class WordDiffResult
 
     /// <summary>Start offsets of the changes (adjacent deleted + inserted runs count as one), for F7 navigation.</summary>
     public required IReadOnlyList<int> Changes { get; init; }
+
+    /// <summary>For every change (same index as <see cref="Changes"/>), how to revert it in the new text.</summary>
+    public required IReadOnlyList<WordRevert> Reverts { get; init; }
 
     public int DeletedWords { get; init; }
     public int InsertedWords { get; init; }
@@ -44,6 +54,8 @@ public static class WordDiff
         var sb = new StringBuilder(newText.Length + 256);
         var spans = new List<WordSpan>();
         var changes = new List<int>();
+        var reverts = new List<WordRevert>();
+        WordRevert current = new(null, 0, 0, 0, 0, "");
         int deletedWords = 0, insertedWords = 0;
 
         void AppendLines(string[] source, int start, int count)
@@ -58,7 +70,7 @@ public static class WordDiff
         void Mark(string text, WordChange kind)
         {
             if (text.Length == 0) return;
-            if (!TouchesPrevious()) changes.Add(sb.Length);
+            if (!TouchesPrevious()) { changes.Add(sb.Length); reverts.Add(current); }
             spans.Add(new WordSpan(sb.Length, text.Length, kind));
             sb.Append(text);
             int words = CountWords(text);
@@ -76,6 +88,7 @@ public static class WordDiff
 
             string oldBlock = string.Join('\n', oldLines, b.OldStart, b.OldCount);
             string newBlock = string.Join('\n', newLines, b.NewStart, b.NewCount);
+            current = new WordRevert(b, 0, 0, 0, 0, "");
             if (b.Kind == DiffKind.Inserted)
             {
                 Mark(newBlock + (lastNew ? "" : "\n"), WordChange.Inserted);
@@ -93,7 +106,16 @@ public static class WordDiff
                 Mark(oldBlock + "\n", WordChange.Deleted);
                 Mark(newBlock, WordChange.Inserted);
             }
-            else AppendWordDiff(oldBlock, newBlock, Mark, s => sb.Append(s));
+            else
+            {
+                int blockLine = b.NewStart;
+                AppendWordDiff(oldBlock, newBlock, Mark, s => sb.Append(s), (from, to, oldText) =>
+                {
+                    var (l0, c0) = Position(newBlock, from);
+                    var (l1, c1) = Position(newBlock, to);
+                    current = new WordRevert(null, blockLine + l0, c0, blockLine + l1, c1, oldText);
+                });
+            }
             if (!lastNew) sb.Append('\n');
         }
         AppendLines(newLines, newLine, newLines.Length - newLine);
@@ -103,12 +125,42 @@ public static class WordDiff
             Text = sb.ToString(),
             Spans = spans,
             Changes = changes,
+            Reverts = reverts,
             DeletedWords = deletedWords,
             InsertedWords = insertedWords,
         };
     }
 
-    private static void AppendWordDiff(string oldBlock, string newBlock, Action<string, WordChange> mark, Action<string> plain)
+    /// <summary>The new text with one change reverted (lines joined with "\n").</summary>
+    public static string Revert(string oldText, string newText, WordRevert r)
+    {
+        var oldLines = LineDiff.SplitLines(oldText);
+        var newLines = LineDiff.SplitLines(newText).ToList();
+        if (r.Lines is { } b)
+        {
+            newLines.RemoveRange(b.NewStart, Math.Min(b.NewCount, newLines.Count - b.NewStart));
+            newLines.InsertRange(b.NewStart, oldLines.Skip(b.OldStart).Take(b.OldCount));
+            return string.Join('\n', newLines);
+        }
+        string joined = string.Join('\n', newLines);
+        int Offset(int line, int column) => newLines.Take(line).Sum(l => l.Length + 1) + column;
+        int start = Offset(r.Line, r.Column), end = Offset(r.EndLine, r.EndColumn);
+        return joined[..start] + r.OldText + joined[end..];
+    }
+
+    /// <summary>The line (from 0) and column of an offset in a block of lines joined with "\n".</summary>
+    private static (int Line, int Column) Position(string block, int offset)
+    {
+        int line = 0, lineStart = 0;
+        for (int i = 0; i < offset && i < block.Length; i++)
+            if (block[i] == '\n') { line++; lineStart = i + 1; }
+        return (line, offset - lineStart);
+    }
+
+    /// <param name="revert">Called before each change's runs are marked: the change's range in the new block and the
+    /// old text that replaces it to revert the change (whitespace included, exactly).</param>
+    private static void AppendWordDiff(string oldBlock, string newBlock, Action<string, WordChange> mark, Action<string> plain,
+        Action<int, int, string> revert)
     {
         var chunker = new WhitespaceChunker();
         var oldTokens = chunker.Chunk(oldBlock);
@@ -121,6 +173,8 @@ public static class WordDiff
             // Removed words; whitespace around them is not marked (git does the same).
             string removed = string.Concat(oldTokens.Skip(d.DeleteStartA).Take(d.DeleteCountA));
             string added = string.Concat(newTokens.Skip(d.InsertStartB).Take(d.InsertCountB));
+            int from = newTokens.Take(d.InsertStartB).Sum(t => t.Length);
+            revert(from, from + added.Length, removed);
             EmitTrimmed(removed, WordChange.Deleted, mark, plain, keepWhitespace: false);
             EmitTrimmed(added, WordChange.Inserted, mark, plain, keepWhitespace: true);
             ni = d.InsertStartB + d.InsertCountB;
