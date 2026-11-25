@@ -2,6 +2,8 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <AssemblyName>EelDitor</AssemblyName>
+    <Company>Michał Czardybon</Company>
+    <Authors>Michał Czardybon</Authors>
     <RootNamespace>EelDitor.App</RootNamespace>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <ApplicationManifest>app.manifest</ApplicationManifest>

@@ -70,7 +70,8 @@ public partial class MainWindow
 
     /// <summary>Commands that apply to the cell editor's text while a table cell is edited (from the menu or toolbar).</summary>
     private static readonly HashSet<string> CellEditorCommands =
-        ["md.bold", "md.italic", "md.strike", "md.code", "md.highlight", "md.sub", "md.sup", "md.clearFormat"];
+        ["md.bold", "md.italic", "md.strike", "md.code", "md.highlight", "md.sub", "md.sup", "md.clearFormat",
+            "edit.copy", "edit.paste", "edit.selectAll"];
 
     private void Add(string id, string labelKey, Action execute, string[]? gestures = null, Func<bool>? canExecute = null, Func<bool>? isChecked = null, string? tooltipKey = null)
     {
@@ -78,7 +79,7 @@ public partial class MainWindow
         {
             Id = id,
             LabelKey = labelKey,
-            // Only the style commands act on a cell being edited; any other command ends that edit first.
+            // Commands handled by the cell editor keep it open.
             Execute = CellEditorCommands.Contains(id) ? execute : () => { CloseCellEditor(); execute(); },
             Gestures = gestures ?? [],
             CanExecute = canExecute,
@@ -100,6 +101,13 @@ public partial class MainWindow
     /// <summary>Copies the selection; in Markdown with its styles closed (no lone markers in the clipboard).</summary>
     private async Task CopyAsync()
     {
+        if (CellEditor is { } cell)
+        {
+            if (cell.SelectionLength > 0 && _cellView is { } view && Clipboard is { } cellClipboard)
+                await cellClipboard.SetTextAsync(MarkdownCommands.BalancedSelectionText(cell, view)
+                    ?? cell.Document.GetText(cell.SelectionStart, cell.SelectionLength));
+            return;
+        }
         // Selected table cells (rows, a column, a block): Markdown rows and an HTML table (Word keeps it a table).
         if (Editor.SelectionLength == 0 && SelectedCellBlock() is { } block)
         {
@@ -110,6 +118,11 @@ public partial class MainWindow
         if (_markdown?.GridSelection.Text is { } shown && Clipboard is { } board)
         {
             await board.SetTextAsync(shown);
+            return;
+        }
+        if (Editor.SelectionLength == 0 && _markdown is { TablesAsGrid: true, CurrentCell: { } current })
+        {
+            await CopyCellsAsync(([current.Line], current.Cell, current.Cell));
             return;
         }
         if (_markdown is not null && MarkdownCommands.BalancedSelectionText(Editor, _markdown) is { } text && Clipboard is { } clipboard)
@@ -222,7 +235,7 @@ public partial class MainWindow
         Add("edit.copy", "Menu.Edit.Copy", () => _ = CopyAsync(), ["Ctrl+C", "Ctrl+Insert"]);
         Add("edit.paste", "Menu.Edit.Paste", () => _ = PasteAsync(), ["Ctrl+V", "Shift+Insert"]);
         Add("edit.pastePlain", "Menu.Edit.PastePlain", () => _ = PasteTextAsync(), null, () => !Editor.IsReadOnly, tooltipKey: "Menu.Edit.PastePlainTip");
-        Add("edit.selectAll", "Menu.Edit.SelectAll", () => Editor.SelectAll(), ["Ctrl+A"]);
+        Add("edit.selectAll", "Menu.Edit.SelectAll", () => (CellEditor ?? Editor).SelectAll(), ["Ctrl+A"]);
         Add("edit.specialChar", "Menu.Edit.SpecialChar", ShowSpecialCharacters, null, () => !Editor.IsReadOnly && _diffView is null, tooltipKey: "Menu.Edit.SpecialCharTip");
         Add("edit.duplicate", "Menu.Edit.Duplicate", DuplicateLines, ["Ctrl+D"]);
         Add("edit.deleteLine", "Menu.Edit.DeleteLine", DeleteLines, ["Ctrl+Shift+L", "Ctrl+L"]);

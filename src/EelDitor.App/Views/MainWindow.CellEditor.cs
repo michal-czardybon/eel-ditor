@@ -441,7 +441,9 @@ public partial class MainWindow
     /// </summary>
     private bool HandleGridKey(Key key)
     {
-        if (_markdown is not { TablesAsGrid: true } view || view.CaretGridRow is not { } line || view.CurrentCell is not { } current
+        if (_markdown is not { TablesAsGrid: true } view) return false;
+        if (view.CaretGridRow is not { } line) return EnterGridFromAdjacentLine(view, key);
+        if (view.CurrentCell is not { } current
             || view.Model.TableAtLine(line.LineNumber - 1) is not { } table) return false;
         if (Editor.SelectionLength > 0) Editor.TextArea.ClearSelection();
         int row = line.LineNumber - 1 - table.FirstLine;
@@ -485,6 +487,35 @@ public partial class MainWindow
                 }
                 return true;
         }
+    }
+
+    private bool EnterGridFromAdjacentLine(MarkdownView view, Key key)
+    {
+        if (key is not (Key.Up or Key.Down) || Editor.SelectionLength > 0) return false;
+        var doc = Editor.Document;
+        var line = doc.GetLineByOffset(Editor.CaretOffset);
+        var target = key == Key.Up ? line.PreviousLine : line.NextLine;
+        if (target is null || view.Model.TableAtLine(target.LineNumber - 1)?.RowAtLine(target.LineNumber - 1) is not { } row)
+            return false;
+        if (row.Kind == MdLineKind.TableSeparator)
+        {
+            target = key == Key.Up ? target.PreviousLine : target.NextLine;
+            if (target is null || view.Model.TableAtLine(target.LineNumber - 1)?.RowAtLine(target.LineNumber - 1) is not { } cells)
+                return false;
+            row = cells;
+        }
+        if (row.Cells.Count == 0) return false;
+
+        var tv = Editor.TextArea.TextView;
+        tv.EnsureVisualLines();
+        int edge = key == Key.Up ? line.Offset : line.EndOffset;
+        double edgeY = tv.GetVisualPosition(new TextViewPosition(doc.GetLocation(edge)), VisualYPosition.LineTop).Y;
+        double caretY = tv.GetVisualPosition(Editor.TextArea.Caret.Position, VisualYPosition.LineTop).Y;
+        if (Math.Abs(edgeY - caretY) > 0.5) return false;
+
+        Editor.CaretOffset = target.Offset + row.Cells[0].ContentStart(doc.GetText(target));
+        Editor.TextArea.Caret.BringCaretToView();
+        return true;
     }
 
     private void MoveCaretBelowTable(MarkdownTable table)

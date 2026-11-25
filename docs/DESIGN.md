@@ -235,7 +235,8 @@ give a shorter table. The work is bounded, so typing in a large table stays quic
 - **Images in tables are shown as their text** (italic) in every view — as text, as a grid and in the cell editor —
   because a grid cell cannot hold a preview; before, the preview appeared in some views and not in others.
 - **Selecting text in a grid** is a separate display-only selection (`GridTextSelection`): drag inside one cell selects
-  its shown text, across cells selects whole cells; Ctrl+C copies shown text (several cells: TSV, one line per row).
+  its shown text, across cells selects whole cells. Ctrl+C copies shown text for a partial selection. Copying whole
+  cells, including the current empty cell, puts Markdown rows and an HTML table on the clipboard.
   Select column / Select row use this selection in a grid (the source ranges the text mode highlights are not drawn there).
 - **Commands act on the selected cells.** Styles (Ctrl+B…, highlight), clear formatting and convert style apply to the
   cells selected by Select column / row or by dragging in a grid (part of one cell maps back through the hidden
@@ -253,7 +254,8 @@ give a shorter table. The work is bounded, so typing in a large table stays quic
   discoverable). Tab / Shift+Tab and an arrow at the edge of the text (before the first or after the last shown
   character, on the first or last drawn line) go on to the neighbouring cell, still editing. A click on the menu or the
   toolbar does not end the edit: the style commands (bold, highlight, clear formatting…) apply to the text selected in
-  the cell editor, any other command ends the edit first. (The popup's light dismiss is not used: it swallowed the
+  the cell editor. Copy, paste and Select all also operate inside the cell editor. Copy balances style markers
+  around the selection so pasted paragraphs keep their formatting. (The popup's light dismiss is not used: it swallowed the
   click, so such a click only closed the editor and the style went to the whole cell. A menu's items are in a popup of
   their own, whose clicks reach the window too: clicks in any popup do not end the edit.) The edit also ends when the
   window is left (the popup is a window above the others).
@@ -261,8 +263,8 @@ give a shorter table. The work is bounded, so typing in a large table stays quic
   line break and its markers showed. The editor gets the style closed and opened again around the break
   (`==one==` / `==two==`), and saving joins it back where those markers are still as made, so the row is written as
   before. A change that would break the row is not written and
-  is reported on the status bar. Spaces typed after the text (not part of the cell's width yet) widen the editor too,
-  so they do not wrap to the next line. There are no hints in the editor. True in-place editing (no editor at all) would need
+  is reported on the status bar. Trailing spaces stay editable and occupy the available room inside the cell. They
+  regain their normal width when another character follows. There are no hints in the editor. True in-place editing would need
   a caret, selection, input and IME of our own for grid rows — AvaloniaEdit lays a line out as one flow of elements,
   and cells side by side cannot be expressed — so it is not done.
 - **Clipboard:** copying selected cells puts Markdown rows (plain text; whole rows exactly as written, a header with a
@@ -456,7 +458,9 @@ diff-friendly mode.
 ## 10b. Preview (HTML and Markdown)
 
 - View → HTML preview (Ctrl+Shift+V, as in VS Code) shows the current file rendered **on the right of the text**: an
-  HTML file as itself, a Markdown file through `MarkdownHtml` (the same HTML as the export). It keeps its scroll position;
+  HTML file as itself, a Markdown file through `MarkdownHtml` (the same rendering rules as the export). While a diff
+  is open, the preview shows its right-hand version, including when the right-hand side is a snapshot or the diff is
+  displayed word by word.
   its width and visibility are remembered; ✕ on its bar closes it. Trial since 2026-11-23.
 - **Live, without blocking typing or burning a core:** a change only marks the preview dirty (a flag, not a queue: only
   the newest text matters); at most one rendering is pending; it runs at background priority, after input; the pause
@@ -472,6 +476,23 @@ diff-friendly mode.
 - It is a separate read-only view beside the text, never a mode of the text (principle 3); text in it can be
   selected and copied. A click on a link opens it (no caret to place, so no Ctrl), `#anchor` links scroll the
   preview, other links go through the same rules as Ctrl+click in the editor. Documents over 3 MB are not previewed.
+
+### Scrolling
+
+- The editor and each diff pane scroll to the end of the laid-out document. Wrapping, resizing and measuring rows
+  in the background update the scrollbar range. During background measurement the visible source position stays
+  anchored. A view already at the bottom stays there as its range changes.
+- Side-by-side diff synchronization is enabled by default and can be turned off. Either pane drives the other.
+  Corresponding source lines are aligned through the diff, so inserted or removed lines do not introduce a permanent
+  offset. At the top or bottom both panes reach their own endpoint, including when their lengths differ. A delayed
+  scroll notification from the receiving pane does not override a new scroll in the opposite direction.
+- The HTML preview and its visible source scroll in both directions by corresponding source lines. Blocks such as
+  headings, paragraphs, list items and table rows supply anchors. Positions inside a block are approximate because
+  rendering changes line heights and wrapping. A view without usable anchors follows the relative scroll position.
+  At either endpoint both views reach their own endpoint.
+- With a side-by-side diff and preview open, the preview follows the right pane. The left pane participates when
+  diff synchronization is on. With word diff open, positions are mapped through the after-version, accounting for
+  deleted text displayed in the word diff. Switching modes reconnects the preview to the visible source.
 
 ---
 

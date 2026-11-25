@@ -248,9 +248,12 @@ public class GitConsoleTests
         File.WriteAllText(Path.Combine(theirs, "a.txt"), "theirs\n");
         await Git(theirs, "commit", "-q", "-am", "theirs");
         await Git(theirs, "push", "-q");
+        int completedBeforePull = w.GitConsole!.Text.Split(Loc.T("Git.ConsoleDone")).Length;
         Click(w, "Pull");
+        Until(() => w.GitConsole?.Text.Split(Loc.T("Git.ConsoleDone")).Length > completedBeforePull,
+            () => "pull: " + w.GitConsole?.Text);
         // Line ends as core.autocrlf checks them out.
-        Until(() => File.ReadAllText(Path.Combine(mine, "a.txt")).Trim() == "theirs", () => "pull: " + w.GitConsole?.Text);
+        Assert.Equal("theirs", File.ReadAllText(Path.Combine(mine, "a.txt")).Trim());
         var doc = ((OpenFilesModel)w.DataContext!).Documents.Single(d => d.FileName == "a.txt");
         Until(() => doc.Document.Text.Trim() == "theirs", () => "reload: " + doc.Document.Text);
 

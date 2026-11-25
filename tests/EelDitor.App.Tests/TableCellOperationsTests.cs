@@ -4,10 +4,12 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Threading;
+using AvaloniaEdit.Rendering;
 using EelDitor.App.Documents;
 using EelDitor.App.Editor;
 using EelDitor.App.Services;
 using EelDitor.App.Views;
+using EelDitor.Markdown;
 
 namespace EelDitor.App.Tests;
 
@@ -253,6 +255,120 @@ public class TableCellOperationsTests
     private static void Settle()
     {
         for (int i = 0; i < 20; i++) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(5); }
+    }
+
+    private static TableRowElement GridRow(MainWindow w, int line)
+    {
+        var tv = w.Editor.TextArea.TextView;
+        return Assert.IsType<TableRowElement>(Assert.Single(tv.GetOrConstructVisualLine(w.Editor.Document.GetLineByNumber(line)).Elements));
+    }
+
+    [AvaloniaFact]
+    public void WrappedCell_LongWordsAndProseRaiseTheRowAndKeepAdjacentCells()
+    {
+        var (w, doc) = Open("| left | middle | right |\n|---|---|---|\n| keep | x | tail |\n\nAfter", wrap: true);
+        double original = w.Editor.TextArea.TextView.GetOrConstructVisualLine(doc.Document.GetLineByNumber(3)).Height;
+        w.EditTableCell(3, 1);
+        var cell = w.CellEditor!;
+        string word = new('x', 250);
+        string prose = " " + string.Join(" ", Enumerable.Repeat("more text", 45));
+        cell.TextArea.PerformTextInput(word);
+        Settle();
+        Assert.True(GridRow(w, 3).Cells[1].Ranges.Count > 1);
+        cell.TextArea.PerformTextInput(prose);
+        Settle();
+        w.UpdateLayout();
+        var row = GridRow(w, 3);
+        Assert.Equal(["keep", word + prose, "tail"], row.Cells.Select(c => c.Text));
+        Assert.True(w.Editor.TextArea.TextView.GetOrConstructVisualLine(doc.Document.GetLineByNumber(3)).Height > original);
+        Assert.Equal("After", Line(doc, 5));
+        Run(w, "md.table.editCell");
+        Assert.Equal(word + prose, w.CellEditor!.Text);
+        CellKey(w, Key.Enter, KeyModifiers.Control);
+        doc.Document.UndoStack.MarkAsOriginalFile();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public void WrappedCell_StyledParagraphsCopyAndPasteIntoTheSameAndADifferentCell()
+    {
+        var (w, doc) = Open("| A | B |\n|---|---|\n| one<br><br>two |  |\n", wrap: true);
+        w.EditTableCell(3, 0, 0);
+        var cell = w.CellEditor!;
+        cell.Select(0, 3);
+        Run(w, "md.bold");
+        cell.Select(cell.Text!.IndexOf("two", StringComparison.Ordinal), 3);
+        Run(w, "md.italic");
+        cell.Select(2, "one**\n\n*two".Length);
+        Run(w, "edit.copy");
+        Assert.Equal("**one**\n\n*two*", Await(w.Clipboard!.TryGetTextAsync())!.Replace("\r\n", "\n"));
+        Assert.Same(cell, w.CellEditor);
+        Run(w, "edit.selectAll");
+        Assert.Equal(cell.Document.TextLength, cell.SelectionLength);
+        Run(w, "edit.paste");
+        Assert.Equal("**one**\n\n*two*", cell.Text);
+
+        w.EditTableCell(3, 1);
+        Assert.Equal("", w.CellEditor!.Text);
+        Run(w, "edit.paste");
+        Settle();
+        Assert.Equal("**one**\n\n*two*", w.CellEditor!.Text);
+        Assert.Equal("| **one**<br><br>*two* | **one**<br><br>*two* |", Line(doc, 3));
+        var row = GridRow(w, 3);
+        Assert.Equal("one\n\ntwo", row.Cells[1].Text);
+        Assert.True(row.Cells[1].Styles[0].HasFlag(MdStyle.Bold));
+        Assert.True(row.Cells[1].Styles[^1].HasFlag(MdStyle.Italic));
+        CellKey(w, Key.Enter, KeyModifiers.Control);
+        doc.Document.UndoStack.MarkAsOriginalFile();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public void WideGrid_EmptyColumnAndRowAreDisplayedNavigableAndCopyable()
+    {
+        const int columns = 18;
+        static string Row(IEnumerable<string> cells) => "| " + string.Join(" | ", cells) + " |";
+        string header = Row(Enumerable.Range(0, columns).Select(i => i == 5 ? "" : $"H{i}"));
+        string separator = Row(Enumerable.Repeat("---", columns));
+        string empty = Row(Enumerable.Repeat("", columns));
+        string source = $"{header}\n{separator}\n{empty}\n{empty}\n\nAfter";
+        var (w, doc) = Open(source, wrap: true);
+        var view = View(w);
+        Assert.Equal(columns, GridRow(w, 1).Cells.Count);
+        Assert.All(GridRow(w, 3).Cells, c => Assert.Equal("", c.Text));
+        w.EditTableCell(3, 5, 0);
+        CellKey(w, Key.Right);
+        Assert.Equal((3, 6), view.CurrentCell);
+        CellKey(w, Key.Down);
+        Assert.Equal((4, 6), view.CurrentCell);
+        CellKey(w, Key.Down);
+        Assert.Null(w.CellEditor);
+        Assert.Equal(5, w.Editor.TextArea.Caret.Line);
+        w.Editor.TextArea.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Up });
+        Settle();
+        Assert.Equal(4, view.CurrentCell?.Line);
+        Run(w, "md.bold");
+        Assert.Equal(source, doc.Document.Text);
+        Run(w, "edit.copy");
+        Assert.Equal("|  |", Await(w.Clipboard!.TryGetTextAsync())!.TrimEnd());
+
+        w.EditTableCell(4, columns - 1);
+        CellKey(w, Key.B, KeyModifiers.Control);
+        Assert.Equal(source, doc.Document.Text);
+        w.CellEditor!.TextArea.PerformTextInput("bold");
+        Settle();
+        Assert.Equal("bold", GridRow(w, 4).Cells[^1].Text);
+        Assert.All(GridRow(w, 4).Cells[^1].Styles, style => Assert.True(style.HasFlag(MdStyle.Bold)));
+        Assert.Equal("", GridRow(w, 4).Cells[5].Text);
+        Await(w.Clipboard!.SetTextAsync("fresh\r\ntext").ContinueWith(_ => 0));
+        w.EditTableCell(4, 5);
+        Run(w, "edit.paste");
+        Settle();
+        Assert.Equal("fresh\ntext", GridRow(w, 4).Cells[5].Text);
+        Assert.All(GridRow(w, 3).Cells, c => Assert.Equal("", c.Text));
+        CellKey(w, Key.Enter, KeyModifiers.Control);
+        doc.Document.UndoStack.MarkAsOriginalFile();
+        w.Close();
     }
 
     [AvaloniaTheory]

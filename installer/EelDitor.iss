@@ -2,6 +2,7 @@
 ; Build with build-installer.ps1, which publishes the app and builds the Explorer extension before running ISCC.
 
 #define AppName "Eel-ditor"
+#define AppAuthor "Michał Czardybon"
 #define AppExe "EelDitor.exe"
 #define SourceExe "..\publish\win-x64\" + AppExe
 #define GitMenuDll "EelDitorGitMenu.dll"
@@ -18,7 +19,9 @@ AppId={{C2EC2A29-C318-4512-8F26-5906B3AA7A52}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
-AppPublisher={#AppName}
+AppPublisher={#AppAuthor}
+VersionInfoCompany={#AppAuthor}
+VersionInfoCopyright=© {#AppAuthor}
 VersionInfoVersion={#AppVersion}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}

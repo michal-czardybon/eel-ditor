@@ -46,12 +46,17 @@ public partial class MainWindow
             var render = _markdown.Model.GetLine(n - 1);
             bool header = row.Kind == MdLineKind.TableHeader;
             withHeader |= header;
-            var cells = Enumerable.Range(block.FirstCell, block.LastCell - block.FirstCell + 1)
-                .Select(i => i < row.Cells.Count ? row.Cells[i] : null).ToList();
+            var cells = Enumerable.Range(block.FirstCell, block.LastCell - block.FirstCell + 1).Select(i =>
+            {
+                if (i >= row.Cells.Count) return (Start: 0, End: 0);
+                var cell = row.Cells[i];
+                int start = cell.ContentStart(text);
+                return (Start: start, End: Math.Max(start, cell.ContentEnd(text)));
+            }).ToList();
             // Whole rows keep their source exactly; part of a row becomes a row of those cells.
-            markdown.Add(wholeRows ? text : TableClipboard.Row(cells.Select(c => c is null ? "" : text[c.ContentStart(text)..c.ContentEnd(text)]).ToList(), cells.Count));
+            markdown.Add(wholeRows ? text : TableClipboard.Row(cells.Select(c => text[c.Start..c.End]).ToList(), cells.Count));
             if (header) markdown.Add(TableClipboard.Separator(cells.Count));
-            html.Add(cells.Select(c => c is null ? "" : MarkdownHtml.Inline(text, render, c.ContentStart(text), c.ContentEnd(text), header ? MdStyle.Bold : MdStyle.None)).ToList());
+            html.Add(cells.Select(c => MarkdownHtml.Inline(text, render, c.Start, c.End, header ? MdStyle.Bold : MdStyle.None)).ToList());
         }
         string nl = NewLineAt(block.Lines[0]);
         string table1 = TableClipboard.HtmlTable(html, withHeader);
@@ -103,6 +108,16 @@ public partial class MainWindow
 
     private async Task PasteAsync()
     {
+        if (CellEditor is { } cell)
+        {
+            string? cellText = Clipboard is { } clipboard ? await clipboard.TryGetTextAsync() : null;
+            if (!string.IsNullOrEmpty(cellText) && ReferenceEquals(CellEditor, cell))
+            {
+                cell.TextArea.Selection.ReplaceSelectionWithText(cellText.Replace("\r\n", "\n").Replace('\r', '\n'));
+                cell.TextArea.Caret.BringCaretToView();
+            }
+            return;
+        }
         if (Editor.IsReadOnly) return;
         if (_markdown is null) { await PasteTextAsync(); return; }
         var (html, text) = await ReadClipboardAsync();
