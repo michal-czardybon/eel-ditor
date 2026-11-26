@@ -87,27 +87,38 @@ public static class TableEditor
         return edits;
     }
 
-    public static IReadOnlyList<TableEdit> DeleteColumn(MarkdownTable table, int column)
+    public static IReadOnlyList<TableEdit> DeleteColumn(MarkdownTable table, int column) =>
+        DeleteColumns(table, column, column);
+
+    public static IReadOnlyList<TableEdit> DeleteColumns(MarkdownTable table, int first, int last)
     {
-        if (table.ColumnCount <= 1) return [];
+        int remaining = table.ColumnCount - (last - first + 1);
+        if (remaining <= 0) return [];
         var edits = new List<TableEdit>();
         foreach (var row in table.Rows)
         {
-            if (column >= row.Cells.Count) continue;
-            var cell = row.Cells[column];
-            // A single cell still needs a pipe to be parsed as a table row.
-            bool keepPipe = table.ColumnCount == 2 && row.Cells.Count == 2 && !row.HasLeadingPipe && !row.Cells[^1].HasClosingPipe;
-            if (cell.HasClosingPipe)
+            if (first >= row.Cells.Count) continue;
+            int endColumn = Math.Min(last, row.Cells.Count - 1);
+            if (first == 0 && endColumn == row.Cells.Count - 1)
             {
-                int start = cell.Start;
-                // First cell of a row without leading pipe: also no pipe before it, just remove "cell|".
-                edits.Add(TableEdit.Replace(row.LineIndex, start, cell.ClosingPipe + (keepPipe ? 0 : 1) - start, ""));
+                edits.Add(TableEdit.Replace(row.LineIndex, 0, row.Cells[^1].End + (row.Cells[^1].HasClosingPipe ? 1 : 0), "| |"));
+                continue;
+            }
+            var firstCell = row.Cells[first];
+            var lastCell = row.Cells[endColumn];
+            // A single cell still needs a pipe to be parsed as a table row.
+            bool keepPipe = row.Cells.Count - (endColumn - first + 1) == 1
+                && !row.HasLeadingPipe && !row.Cells[^1].HasClosingPipe;
+            if (lastCell.HasClosingPipe)
+            {
+                int start = firstCell.Start;
+                edits.Add(TableEdit.Replace(row.LineIndex, start, lastCell.ClosingPipe + (keepPipe ? 0 : 1) - start, ""));
             }
             else
             {
                 // Last cell without trailing pipe: remove the pipe before it as well.
-                int start = keepPipe ? cell.Start : Math.Max(0, cell.Start - 1);
-                edits.Add(TableEdit.Replace(row.LineIndex, start, cell.End - start, ""));
+                int start = keepPipe ? firstCell.Start : firstCell.Start - 1;
+                edits.Add(TableEdit.Replace(row.LineIndex, start, lastCell.End - start, ""));
             }
         }
         return edits;
@@ -149,6 +160,94 @@ public static class TableEditor
         if (rowIndex <= 1) return [new TableEdit(TableEditKind.InsertLineAfter, table.Separator.LineIndex, Text: row)];
         int line = table.Rows[rowIndex].LineIndex;
         return [new TableEdit(below ? TableEditKind.InsertLineAfter : TableEditKind.InsertLineBefore, line, Text: row)];
+    }
+
+    /// <summary>Clears cell contents without filling missing cells in short rows.</summary>
+    public static IReadOnlyList<TableEdit> ClearCells(MarkdownTable table, ILineSource source,
+        IEnumerable<int> lines, int firstColumn, int lastColumn)
+    {
+        var edits = new List<TableEdit>();
+        foreach (int index in lines)
+        {
+            if (table.RowAtLine(index) is not { Kind: not MdLineKind.TableSeparator } row
+                || firstColumn >= row.Cells.Count) continue;
+            string original = source.GetLine(index);
+            var line = new StringBuilder(original);
+            int last = Math.Min(lastColumn, row.Cells.Count - 1);
+            if (!row.Cells[last].HasClosingPipe) line.Append('|');
+            for (int column = last; column >= firstColumn; column--)
+            {
+                var cell = row.Cells[column];
+                int start = cell.ContentStart(original);
+                int end = cell.ContentEnd(original);
+                if (end <= start) continue;
+                line.Remove(start, end - start);
+                if (start == cell.Start && end == cell.End) line.Insert(start, ' ');
+            }
+            if (firstColumn == 0 && !row.HasLeadingPipe) line.Insert(0, '|');
+            string updated = line.ToString();
+            if (updated != original) edits.Add(TableEdit.Replace(index, 0, original.Length, updated));
+        }
+        return edits;
+    }
+
+    /// <summary>Overwrites a block of Markdown cell contents, growing the table to the right and down as needed.</summary>
+    public static IReadOnlyList<TableEdit> PasteCells(MarkdownTable table, ILineSource source, int firstLine, int firstColumn,
+        IReadOnlyList<List<string>> contents)
+    {
+        int width = contents.Max(row => row.Count);
+        int endColumn = firstColumn + width;
+        int columns = Math.Max(table.ColumnCount, endColumn);
+        bool grows = columns > table.ColumnCount;
+        var edits = new List<TableEdit>();
+        int inputRow = 0;
+        foreach (var row in table.Rows)
+        {
+            bool separator = row.Kind == MdLineKind.TableSeparator;
+            var pasted = !separator && row.LineIndex >= firstLine && inputRow < contents.Count ? contents[inputRow++] : null;
+            int required = grows ? columns : pasted is null ? 0 : endColumn;
+            if (required == 0) continue;
+
+            string Value(int column) => pasted is not null && column >= firstColumn && column - firstColumn < pasted.Count
+                ? pasted[column - firstColumn] : "";
+
+            string original = source.GetLine(row.LineIndex);
+            var line = new StringBuilder(original);
+            int count = row.Cells.Count;
+            if (count < required)
+            {
+                int end = count > 0 ? row.Cells[^1].End : original.TrimEnd().Length;
+                if (count > 0 && row.Cells[^1].HasClosingPipe) end++;
+                var suffix = new StringBuilder();
+                if (count > 0 && !row.Cells[^1].HasClosingPipe) suffix.Append('|');
+                for (int column = count; column < required; column++)
+                    suffix.Append(' ').Append(separator ? "---" : Value(column)).Append(" |");
+                line.Insert(end, suffix.ToString());
+            }
+            else if (pasted is not null && endColumn == count && !row.Cells[^1].HasClosingPipe && Value(count - 1).Length == 0)
+                line.Append('|');
+
+            if (pasted is not null)
+            {
+                for (int column = Math.Min(endColumn, count) - 1; column >= firstColumn; column--)
+                {
+                    var cell = row.Cells[column];
+                    line.Remove(cell.Start, cell.End - cell.Start).Insert(cell.Start, $" {Value(column)} ");
+                }
+                if (!row.HasLeadingPipe && firstColumn == 0 && Value(0).Length == 0)
+                    line.Insert(0, '|');
+            }
+            string updated = line.ToString();
+            if (updated != original) edits.Add(TableEdit.Replace(row.LineIndex, 0, original.Length, updated));
+        }
+        for (int i = inputRow; i < contents.Count; i++)
+        {
+            var cells = new string[columns];
+            for (int column = 0; column < contents[i].Count; column++) cells[firstColumn + column] = contents[i][column];
+            edits.Add(new TableEdit(TableEditKind.InsertLineAfter, table.LastLine, Column: i + 1,
+                Text: "| " + string.Join(" | ", cells) + " |"));
+        }
+        return edits;
     }
 
     public static IReadOnlyList<TableEdit> DeleteRow(MarkdownTable table, int rowIndex)

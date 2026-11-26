@@ -205,6 +205,146 @@ public class TableCellOperationsTests
     }
 
     [AvaloniaFact]
+    public void ShiftArrows_ExtendAndShrinkAWholeCellRectangle()
+    {
+        var (w, _) = Open("| a | b | c |\n|---|---|---|\n| left |  | right |\n", wrap: true);
+        var at = CellPoint(w, 3, 0);
+        w.MouseDown(at, MouseButton.Left);
+        w.MouseUp(at, MouseButton.Left);
+
+        Press(w, Key.Right, RawInputModifiers.Shift, PhysicalKey.ArrowRight);
+        var selection = View(w).GridSelection;
+        var block = selection.CellBlock!.Value;
+        Assert.Equal([3], block.Lines);
+        Assert.Equal((0, 1), (block.FirstCell, block.LastCell));
+        var anchor = new GridTextSelection.Point(3, 0, 0);
+        Assert.Equal(anchor, selection.Anchor);
+        Assert.Equal(0, w.Editor.SelectionLength);
+        Press(w, Key.C, RawInputModifiers.Control, PhysicalKey.C);
+        Assert.Equal("| left |  |", Await(w.Clipboard!.TryGetTextAsync())!.TrimEnd());
+
+        Press(w, Key.Up, RawInputModifiers.Shift, PhysicalKey.ArrowUp);
+        Assert.Equal([1, 3], selection.CellBlock!.Value.Lines);
+        Assert.Equal(anchor, selection.Anchor);
+        Assert.Equal((1, 1), View(w).CurrentCell);
+        Press(w, Key.Up, RawInputModifiers.Shift, PhysicalKey.ArrowUp);
+        Assert.Equal((1, 1), View(w).CurrentCell);
+        Assert.Equal(anchor, selection.Anchor);
+        Press(w, Key.Down, RawInputModifiers.Shift, PhysicalKey.ArrowDown);
+        Assert.Equal(new GridTextSelection.Point(3, 1, 0), selection.Active);
+        Assert.Equal(anchor, selection.Anchor);
+        Assert.Equal((3, 1), View(w).CurrentCell);
+        Press(w, Key.Left, RawInputModifiers.Shift, PhysicalKey.ArrowLeft);
+        Assert.Equal(selection.Anchor, selection.Active);
+        Assert.Equal((3, 0), View(w).CurrentCell);
+        Assert.Equal(0, w.Editor.SelectionLength);
+    }
+
+    [AvaloniaFact]
+    public void DeleteClearsSelectedGridCellsAndKeepsTheSelection()
+    {
+        const string source = "| a | b | c |\n|:---|---|---:|\n| **left** | x<br>y | keep |\n| one |  | tail |\n";
+        var (w, doc) = Open(source, wrap: true);
+        var at = CellPoint(w, 3, 0);
+        w.MouseDown(at, MouseButton.Left);
+        w.MouseUp(at, MouseButton.Left);
+        Press(w, Key.Right, RawInputModifiers.Shift, PhysicalKey.ArrowRight);
+        Press(w, Key.Down, RawInputModifiers.Shift, PhysicalKey.ArrowDown);
+        Press(w, Key.Delete, RawInputModifiers.None, PhysicalKey.Delete);
+
+        Assert.Equal("| a | b | c |\n|:---|---|---:|\n|  |  | keep |\n|  |  | tail |\n", doc.Document.Text);
+        var block = View(w).GridSelection.CellBlock!.Value;
+        Assert.Equal([3, 4], block.Lines);
+        Assert.Equal((0, 1), (block.FirstCell, block.LastCell));
+        Assert.Equal((4, 1), View(w).CurrentCell);
+        Press(w, Key.Z, RawInputModifiers.Control, PhysicalKey.Z);
+        Assert.Equal(source, doc.Document.Text);
+        Assert.Equal((0, 1), (View(w).GridSelection.CellBlock!.Value.FirstCell, View(w).GridSelection.CellBlock!.Value.LastCell));
+        Press(w, Key.Y, RawInputModifiers.Control, PhysicalKey.Y);
+        Assert.Equal("| a | b | c |\n|:---|---|---:|\n|  |  | keep |\n|  |  | tail |\n", doc.Document.Text);
+        Assert.Equal([3, 4], View(w).GridSelection.CellBlock!.Value.Lines);
+        Press(w, Key.Z, RawInputModifiers.Control, PhysicalKey.Z);
+        Run(w, "md.clearFormat");
+        Assert.Contains("| left | x<br>y | keep |", doc.Document.Text);
+        Run(w, "edit.undo");
+        Assert.Equal(source, doc.Document.Text);
+        Assert.Equal([3, 4], View(w).GridSelection.CellBlock!.Value.Lines);
+    }
+
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DeleteClearsASelectedColumn_WithImplicitOuterPipes(bool wrap)
+    {
+        var (w, doc) = Open("a | b\n:--- | ---:\n1 | 2\n", wrap);
+        w.Editor.TextArea.Focus();
+        CaretIn(w, doc, 3, "2");
+        Run(w, "md.table.selCol");
+        Press(w, Key.Delete, RawInputModifiers.None, PhysicalKey.Delete);
+        Assert.Equal("a | |\n:--- | ---:\n1 | |\n", doc.Document.Text);
+        Press(w, Key.C, RawInputModifiers.Control, PhysicalKey.C);
+        Assert.Equal("|  |\n|---|\n|  |", Await(w.Clipboard!.TryGetTextAsync())!.Replace("\r\n", "\n").TrimEnd());
+    }
+
+    [AvaloniaFact]
+    public void StructuralDeletionUsesTheGridBlock_AndUndoRestoresIt()
+    {
+        const string source = "a | b | c | d\n:--- | --- | ---: | ---\n1 | 2 | 3 | 4\n5 | 6 | 7 | 8\n9 | 10 | 11 | 12\n";
+        var (w, doc) = Open(source, wrap: true);
+        CaretIn(w, doc, 4, "7");
+        var grid = View(w).GridSelection;
+        grid.Select(new(3, 1, 0), new(4, 2, 0));
+        Run(w, "md.table.delCol");
+        Assert.Equal("a | d\n:--- | ---\n1 | 4\n5 | 8\n9 | 12\n", doc.Document.Text);
+        Run(w, "edit.undo");
+        Assert.Equal(source, doc.Document.Text);
+        Assert.Equal([3, 4], grid.CellBlock!.Value.Lines);
+        Assert.Equal((1, 2), (grid.CellBlock.Value.FirstCell, grid.CellBlock.Value.LastCell));
+
+        grid.Select(new(3, 0, 0), new(4, 3, 0));
+        Run(w, "md.table.delCol");
+        Assert.Equal("", doc.Document.Text);
+        Run(w, "edit.undo");
+        Assert.Equal(source, doc.Document.Text);
+        Assert.Equal(3, grid.CellBlock!.Value.LastCell);
+
+        Run(w, "md.table.delRow");
+        Assert.Equal("a | b | c | d\n:--- | --- | ---: | ---\n9 | 10 | 11 | 12\n", doc.Document.Text);
+        Run(w, "edit.undo");
+        Assert.Equal(source, doc.Document.Text);
+        Assert.Equal([3, 4], grid.CellBlock!.Value.Lines);
+    }
+
+    [AvaloniaFact]
+    public void ModifiedClicks_ExtendFromTheCaretOrStartAFreshCellSelection()
+    {
+        var (w, doc) = Open("| a | b | c |\n|---|---|---|\n| left | middle | right |\n| one | two | three |\n", wrap: true);
+        CaretIn(w, doc, 3, "left");
+        void Click(int line, int cell, RawInputModifiers modifiers)
+        {
+            var at = CellPoint(w, line, cell);
+            w.MouseDown(at, MouseButton.Left, modifiers);
+            w.MouseUp(at, MouseButton.Left, modifiers);
+        }
+        Click(4, 1, RawInputModifiers.Shift);
+        var selection = View(w).GridSelection;
+        var block = selection.CellBlock!.Value;
+        Assert.Equal([3, 4], block.Lines);
+        Assert.Equal((0, 1), (block.FirstCell, block.LastCell));
+        Click(4, 1, RawInputModifiers.Shift); // Rapid repeat stays a selection gesture.
+        Assert.Null(w.CellEditor);
+        Assert.Equal(0, w.Editor.SelectionLength);
+        Assert.Equal((4, 1), View(w).CurrentCell);
+
+        Click(4, 2, RawInputModifiers.Control);
+        Assert.False(selection.HasSelection);
+        Assert.Equal((4, 2), View(w).CurrentCell);
+        Assert.Equal(0, w.Editor.SelectionLength);
+        Press(w, Key.Left, RawInputModifiers.Shift, PhysicalKey.ArrowLeft);
+        Assert.Equal((1, 2), (selection.CellBlock!.Value.FirstCell, selection.CellBlock.Value.LastCell));
+    }
+
+    [AvaloniaFact]
     public void ADoubleClick_EditsTheCell_AndItStaysCurrent()
     {
         var (w, _) = Open("| a | b | c |\n|---|---|---|\n| jeden | dwa | trzy |\n", wrap: true);
@@ -284,6 +424,59 @@ public class TableCellOperationsTests
         Assert.Equal("After", Line(doc, 5));
         Run(w, "md.table.editCell");
         Assert.Equal(word + prose, w.CellEditor!.Text);
+        CellKey(w, Key.Enter, KeyModifiers.Control);
+        doc.Document.UndoStack.MarkAsOriginalFile();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public void MultilineCell_VerticalMovementUsesTheNewColumnAfterTyping()
+    {
+        var (w, _) = Open("| a | b |\n|---|---|\n| 123456789<br>abcdefghijklmno | keep |\n", wrap: true);
+        w.EditTableCell(3, 0);
+        Settle();
+        var cell = w.CellEditor!;
+        cell.TextArea.ClearSelection();
+        cell.CaretOffset = 2;
+        CellKey(w, Key.Down);
+        Assert.Equal(3, cell.TextArea.Caret.Column);
+        CellKey(w, Key.Up);
+        cell.TextArea.PerformTextInput("ABCD");
+        Assert.Equal(7, cell.TextArea.Caret.Column);
+        CellKey(w, Key.Down);
+        Assert.Equal(2, cell.TextArea.Caret.Line);
+        Assert.Equal(7, cell.TextArea.Caret.Column);
+        CloseEditor(w);
+    }
+
+    [AvaloniaFact]
+    public void WrappedCell_ColumnGrowsInTheInputTurn_AndOnlyExplicitNewlinesBreakShortText()
+    {
+        var (w, doc) = Open("| a | b |\n|---|---|\n| x | keep |\n", wrap: true);
+        w.EditTableCell(3, 0);
+        Settle();
+        var cell = w.CellEditor!;
+        var tv = cell.TextArea.TextView;
+        double width = cell.Width;
+        cell.TextArea.PerformTextInput("abcdefghijk");
+        Assert.True(cell.Width > width);
+        Assert.Equal("abcdefghijk", GridRow(w, 3).Cells[0].Text);
+        w.UpdateLayout();
+        tv.EnsureVisualLines();
+        Assert.Single(tv.GetVisualLine(1).TextLines);
+
+        cell.TextArea.PerformTextInput("     ");
+        w.UpdateLayout();
+        tv.EnsureVisualLines();
+        Assert.Single(tv.GetVisualLine(1).TextLines);
+        Assert.Equal("abcdefghijk     ", cell.Text);
+        cell.TextArea.PerformTextInput("z");
+        Assert.Equal("abcdefghijk     z", GridRow(w, 3).Cells[0].Text);
+        CellKey(w, Key.Enter);
+        cell.TextArea.PerformTextInput("next");
+        Settle();
+        Assert.Equal("abcdefghijk     z\nnext", GridRow(w, 3).Cells[0].Text);
+        Assert.Equal("keep", GridRow(w, 3).Cells[1].Text);
         CellKey(w, Key.Enter, KeyModifiers.Control);
         doc.Document.UndoStack.MarkAsOriginalFile();
         w.Close();
@@ -374,7 +567,7 @@ public class TableCellOperationsTests
     [AvaloniaTheory]
     [InlineData(false)]
     [InlineData(true)]
-    public void CopyARow_AndPasteItAboveAnotherRow(bool wrap)
+    public void CopyARow_AndOverwriteAnotherRow(bool wrap)
     {
         var (w, doc) = Open("| a | b |\n|---|---|\n| **raz** | dwa |\n| trzy | cztery |\n| pięć | sześć |\n", wrap);
         CaretIn(w, doc, 3, "raz");
@@ -384,16 +577,70 @@ public class TableCellOperationsTests
         var clipboard = w.Clipboard!;
         Assert.Equal("| **raz** | dwa |" + Environment.NewLine.Replace("\r\n", "\n"), Await(clipboard.TryGetTextAsync())!.Replace("\r\n", "\n"));
 
-        CaretIn(w, doc, 5, "pięć");                       // the current row: pasted above it
+        CaretIn(w, doc, 5, "pięć");
         Run(w, "edit.paste");
         Settle();
-        Assert.Equal("| a | b |\n|---|---|\n| **raz** | dwa |\n| trzy | cztery |\n| **raz** | dwa |\n| pięć | sześć |\n", doc.Document.Text);
+        Assert.Equal("| a | b |\n|---|---|\n| **raz** | dwa |\n| trzy | cztery |\n| **raz** | dwa |\n", doc.Document.Text);
         doc.Document.UndoStack.Undo();                    // one step
         Assert.Equal("| a | b |\n|---|---|\n| **raz** | dwa |\n| trzy | cztery |\n| pięć | sześć |\n", doc.Document.Text);
     }
 
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CopyShortcut_CopiesTheCurrentCellOrSelectedColumn(bool wrap)
+    {
+        var (w, doc) = Open("| a | b |\n|---|---|\n| left | right |\n", wrap);
+        if (wrap)
+        {
+            var point = CellPoint(w, 3, 1);
+            w.MouseDown(point, MouseButton.Left);
+            w.MouseUp(point, MouseButton.Left);
+        }
+        else
+            CaretIn(w, doc, 3, "right");
+        Press(w, Key.C, RawInputModifiers.Control, PhysicalKey.C);
+        Assert.Equal("| right |", Await(w.Clipboard!.TryGetTextAsync())!.TrimEnd());
+
+        Press(w, Key.Up, RawInputModifiers.Control | RawInputModifiers.Alt, PhysicalKey.ArrowUp);
+        Press(w, Key.C, RawInputModifiers.Control, PhysicalKey.C);
+        Assert.Equal("| b |\n|---|\n| right |", Await(w.Clipboard!.TryGetTextAsync())!.Replace("\r\n", "\n").TrimEnd());
+
+        Await(w.Clipboard!.SetTextAsync("previous").ContinueWith(_ => 0));
+        Run(w, "md.table.copyCol");
+        Assert.Equal("| b |\n|---|\n| right |", Await(w.Clipboard!.TryGetTextAsync())!.Replace("\r\n", "\n").TrimEnd());
+
+        if (wrap)
+        {
+            var point = CellPoint(w, 3, 0);
+            w.Editor.TextArea.TextView.Redraw();
+            w.MouseDown(point, MouseButton.Left);
+            w.MouseUp(point, MouseButton.Left);
+            Press(w, Key.C, RawInputModifiers.Control, PhysicalKey.C);
+            Assert.Equal("| left |", Await(w.Clipboard!.TryGetTextAsync())!.TrimEnd());
+        }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(false, "| **left** | right |")]
+    [InlineData(true, "| **left** | right |")]
+    [InlineData(true, "**left** | right")]
+    public void CopyAndPasteShortcuts_PasteABodyRowAsItsOwnTable(bool wrap, string row)
+    {
+        var (w, doc) = Open($"| a | b |\n|---|---|\n{row}\n\nBefore after\n", wrap);
+        CaretIn(w, doc, 3, "left");
+        Run(w, "md.table.selRow");
+        Press(w, Key.C, RawInputModifiers.Control, PhysicalKey.C);
+        CaretIn(w, doc, 5, "after");
+        Press(w, Key.V, RawInputModifiers.Control, PhysicalKey.V);
+        Settle();
+
+        Assert.Equal(2, View(w).Model.Tables.Count);
+        Assert.Equal($"| a | b |\n|---|---|\n{row}\n\nBefore \n\n|  |  |\n|---|---|\n| **left** | right |\n\nafter\n", doc.Document.Text);
+    }
+
     [AvaloniaFact]
-    public void CutRows_ThenPasteThem_AtTheHeader_GoesBelowTheSeparator()
+    public void CutRows_ThenPasteThem_AtTheHeader_OverwritesTheHeader()
     {
         var (w, doc) = Open("| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n", wrap: true);
         View(w).GridSelection.Select(new(4, 0, 0), new(4, 1, 1));   // the whole last row
@@ -403,7 +650,7 @@ public class TableCellOperationsTests
         CaretIn(w, doc, 1, "a");
         Run(w, "edit.paste");
         Settle();
-        Assert.Equal("| a | b |\n|---|---|\n| 3 | 4 |\n| 1 | 2 |\n", doc.Document.Text);
+        Assert.Equal("| 3 | 4 |\n|---|---|\n| 1 | 2 |\n", doc.Document.Text);
     }
 
     [AvaloniaFact]
@@ -414,7 +661,44 @@ public class TableCellOperationsTests
         CaretIn(w, doc, 3, "2");
         Run(w, "edit.paste");
         Settle();
-        Assert.Equal("| a | b | c |\n|---|---|---|\n| x | y |  |\n| z | q\\|r |  |\n| 1 | 2 | 3 |\n", doc.Document.Text);
+        Assert.Equal("| a | b | c |\n|---|---|---|\n| 1 | x | y |\n|  | z | q\\|r |\n", doc.Document.Text);
+    }
+
+    [AvaloniaTheory]
+    [InlineData(6, 2)]
+    [InlineData(5, 3)]
+    public void PasteACopiedBlock_UsesTheTopLeftOfTheSelection(int lastLine, int lastColumn)
+    {
+        const string source = "| A | B | C | D |\n|:---|---:|---|---|\n| **x** |  | c | d |\n| y<br>z | w | e | f |\n| 1 | 2 | 3 | 4 |\n| 5 | 6 | 7 | 8 |\n";
+        var (w, doc) = Open(source, wrap: true);
+        CaretIn(w, doc, 3, "**x**");
+        View(w).GridSelection.Select(new(3, 0, 0), new(4, 1, 0));
+        Press(w, Key.C, RawInputModifiers.Control, PhysicalKey.C);
+        CaretIn(w, doc, 6, "7");
+        View(w).GridSelection.Select(new(lastLine, lastColumn, 0), new(5, 1, 0));
+        Press(w, Key.V, RawInputModifiers.Control, PhysicalKey.V);
+        Settle();
+        Assert.Equal(source.Replace("| 1 | 2 | 3 | 4 |\n| 5 | 6 | 7 | 8 |", "| 1 | **x** |  | 4 |\n| 5 | y<br>z | w | 8 |"), doc.Document.Text);
+        Run(w, "edit.undo");
+        Assert.Equal(source, doc.Document.Text);
+        Assert.Equal(lastColumn, View(w).GridSelection.CellBlock!.Value.LastCell);
+        Assert.Equal(lastLine, View(w).GridSelection.CellBlock!.Value.Lines.Last());
+    }
+
+    [AvaloniaFact]
+    public void PasteBlockPastBothEdges_ExtendsOnlyAsFarAsNeeded()
+    {
+        const string source = "a | b\r\n:--- | ---:\r\n1 | 2\r\n\r\nAfter";
+        var (w, doc) = Open(source, wrap: true);
+        CaretIn(w, doc, 3, "2");
+        Await(w.Clipboard!.SetTextAsync("| x | y | z |\n|  | q | r |\n| u | v | w |").ContinueWith(_ => 0));
+        Press(w, Key.V, RawInputModifiers.Control, PhysicalKey.V);
+        Settle();
+        Assert.Equal("a | b|  |  |\r\n:--- | ---:| --- | --- |\r\n1 | x | y | z |\r\n|  |  | q | r |\r\n|  | u | v | w |\r\n\r\nAfter", doc.Document.Text);
+        Assert.Equal(4, View(w).Model.Tables[0].ColumnCount);
+        Assert.Equal(5, View(w).Model.Tables[0].Rows.Count);
+        doc.Document.UndoStack.Undo();
+        Assert.Equal(source, doc.Document.Text);
     }
 
     [AvaloniaFact]

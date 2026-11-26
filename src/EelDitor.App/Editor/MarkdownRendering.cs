@@ -551,7 +551,8 @@ public sealed class MarkdownView : IDisposable
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (!e.GetCurrentPoint(_editor.TextArea).Properties.IsLeftButtonPressed) return;
-        if (e.ClickCount == 2 && GridCellAt(e) is { } cell && Model.TableAtLine(cell.Line - 1)?.RowAtLine(cell.Line - 1)?.Kind != MdLineKind.TableSeparator)
+        if (e.KeyModifiers == KeyModifiers.None && e.ClickCount == 2 && GridCellAt(e) is { } cell
+            && Model.TableAtLine(cell.Line - 1)?.RowAtLine(cell.Line - 1)?.Kind != MdLineKind.TableSeparator)
         {
             // The caret goes into the edited cell's text, so that cell stays the current one.
             var line = _document.GetLineByNumber(cell.Line);

@@ -237,7 +237,14 @@ give a shorter table. The work is bounded, so typing in a large table stays quic
 - **Selecting text in a grid** is a separate display-only selection (`GridTextSelection`): drag inside one cell selects
   its shown text, across cells selects whole cells. Ctrl+C copies shown text for a partial selection. Copying whole
   cells, including the current empty cell, puts Markdown rows and an HTML table on the clipboard.
+  Shift-click and Shift+arrow extend a rectangle of whole cells from the selection anchor. Shift+arrow moves the
+  active end, skips the separator row and stops at table boundaries. Ctrl-click opens a link or starts a fresh
+  selection at the clicked cell.
   Select column / Select row use this selection in a grid (the source ranges the text mode highlights are not drawn there).
+  Delete clears the contents of the selected cells in one undo step. The table and the cell selection stay in place.
+  Remove rows acts on all selected body rows. Remove columns acts on all selected columns, removing the table if
+  they span its full width. Undo restores the previous cell selection after clearing, formatting, pasting, cutting
+  rows, or deleting table structure. Redo restores the selection that the original command left.
 - **Commands act on the selected cells.** Styles (Ctrl+B…, highlight), clear formatting and convert style apply to the
   cells selected by Select column / row or by dragging in a grid (part of one cell maps back through the hidden
   markup), and the selection stays, so the next command applies to the same cells. In a grid without a selection they
@@ -247,7 +254,8 @@ give a shorter table. The work is bounded, so typing in a large table stays quic
   visible. Part of one cell's text is highlighted as text.
 - **Editing a grid cell looks like editing in place**: the cell editor has no frame and the cell's background, lies
   exactly over the cell's text (inside the current cell's outline), wraps at the cell's width and is as tall as the
-  text. Every change is written into the row at once, so the row and its neighbours follow the typing; the whole edit
+  text. Every change is written into the row and the popup adopts the new column width in the same input turn, before
+  layout. This keeps short text from briefly wrapping at the previous width. The whole edit
   is one undo step (Ctrl+Z puts the row back exactly as it was).
 - **Keys of the cell editor** (user's decision): Enter starts a new line in the cell (a `<br>`), as Shift+Enter does;
   Ctrl+Enter, Esc or a click elsewhere end the edit and keep it, like in a spreadsheet (Shift+Enter alone was not
@@ -267,10 +275,13 @@ give a shorter table. The work is bounded, so typing in a large table stays quic
   regain their normal width when another character follows. There are no hints in the editor. True in-place editing would need
   a caret, selection, input and IME of our own for grid rows — AvaloniaEdit lays a line out as one flow of elements,
   and cells side by side cannot be expressed — so it is not done.
-- **Clipboard:** copying selected cells puts Markdown rows (plain text; whole rows exactly as written, a header with a
-  separator) and an HTML table (Windows "HTML Format", others text/html) for Word and Excel. Pasting in a table inserts
-  rows above the current row (below the separator when on the header): from Markdown rows, an HTML table (Word, web)
-  or tab-separated text (Excel), fitted to the table's columns; outside a table a pasted HTML table becomes a new
+- **Clipboard:** copying selected cells puts Markdown rows (plain text with outer pipes, a header with a
+  separator) and an HTML table (Windows "HTML Format", others text/html) for Word and Excel. With no text or block
+  selected, Copy takes the current cell in either table view. Copy column writes the same formats for the current
+  column, including its header. Pasting Markdown rows, an HTML table (Word, web), or tab-separated text (Excel)
+  overwrites from the top-left selected cell or the current cell. The clipboard determines the footprint, and the
+  table gains rows or columns only where that footprint runs past an edge. The separator stays in place. Outside a
+  table, pasted Markdown rows or HTML become a new
   Markdown table. Cut of whole body rows removes them. `TableClipboard` holds the conversions. A pasted table's first row becomes the
   header only when the source marked it as one (`<th>`/`<thead>`, or a Markdown separator); otherwise the new table
   gets an empty header and every pasted row stays a body row.

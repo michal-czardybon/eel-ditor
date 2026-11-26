@@ -7,7 +7,7 @@
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <Company>Eel-ditor</Company>
     <Product>Eel-ditor</Product>
-    <Version>0.3.2</Version>
+    <Version>0.3.3</Version>
     <Copyright>© Michał Czardybon</Copyright>
     <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
     <!-- Build output next to src, not inside each project: bin\<Project>\Debug\net10.0, obj\<Project>.

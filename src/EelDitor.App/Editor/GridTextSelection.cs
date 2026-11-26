@@ -10,8 +10,8 @@ namespace EelDitor.App.Editor;
 
 /// <summary>
 /// Selecting the shown text of a table drawn as a grid (word wrap on), where the editor's own selection can only take
-/// whole rows: dragging inside one cell selects its text, dragging over several cells selects those cells. Copy puts
-/// the shown text in the clipboard (several cells: tab-separated, one line per row). The source is not changed.
+/// whole rows: an unmodified drag inside a cell selects its text, and dragging over several cells selects those cells.
+/// Shift extends a rectangle of whole cells. The source is not changed.
 /// </summary>
 internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
 {
@@ -19,7 +19,7 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
     public readonly record struct Point(int Line, int Cell, int Offset);
 
     private readonly MarkdownView _view;
-    private bool _dragging, _movingCaret;
+    private bool _dragging, _draggingCells, _movingCaret;
 
     public GridTextSelection(MarkdownView view)
     {
@@ -73,7 +73,7 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
     {
         if (!_view.TablesAsGrid) return null;
         var tv = _view.Editor.TextArea.TextView;
-        if (!tv.VisualLinesValid) return null;
+        tv.EnsureVisualLines();
         var p = e.GetPosition(tv) + tv.ScrollOffset;
         var visual = tv.GetVisualLineFromVisualTop(p.Y);
         if (RowElement(visual) is not { } el) return null;
@@ -88,14 +88,17 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
     private void OnPressed(object? sender, PointerPressedEventArgs e)
     {
         if (e.Handled || !e.GetCurrentPoint(_view.Editor.TextArea).Properties.IsLeftButtonPressed) return;
-        // Ctrl+click off a link is a plain click: AvaloniaEdit's own Ctrl+click selected the whole rows from the table's
-        // start to the clicked one. This handler runs before MarkdownView's, so a Ctrl+click on a link is left to it.
-        if (e.ClickCount != 1 || (e.KeyModifiers & ~(KeyModifiers.Shift | KeyModifiers.Control)) != KeyModifiers.None) return;
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && _view.HasLinkAt(e)) return; // the link opens (MarkdownView)
+        if (e.KeyModifiers == KeyModifiers.None && e.ClickCount != 1
+            || (e.KeyModifiers & ~(KeyModifiers.Shift | KeyModifiers.Control)) != KeyModifiers.None) return;
+        if (e.KeyModifiers == KeyModifiers.Control && _view.HasLinkAt(e)) return;
         if (HitTest(e) is not { } hit) { Clear(); return; }
-        if ((e.KeyModifiers & KeyModifiers.Shift) != 0 && Anchor is { } anchor && ReferenceEquals(TableOf(anchor.Line), TableOf(hit.Line)))
-            Select(anchor, hit);
-        else Select(hit, hit);
+        bool extend = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        var anchor = extend ? Anchor ?? CaretCell() : null;
+        _draggingCells = e.KeyModifiers != KeyModifiers.None;
+        if (_draggingCells)
+            SelectCells(anchor is { } a && ReferenceEquals(TableOf(a.Line), TableOf(hit.Line)) ? a : hit, hit);
+        else
+            Select(hit, hit);
         _dragging = true;
         MoveCaretInto(hit);
         _view.Editor.TextArea.Focus();
@@ -103,11 +106,45 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
         e.Handled = true;
     }
 
+    private Point? CaretCell() => _view.CurrentCell is { } cell ? new Point(cell.Line, cell.Cell, 0) : null;
+
+    private void SelectCells(Point anchor, Point active) =>
+        Select(anchor with { Offset = 0 }, active with { Offset = 0 });
+
+    internal bool ExtendWithArrow(Key key)
+    {
+        if (!_view.TablesAsGrid || CaretCell() is not { } caret || TableOf(caret.Line) is not { } table) return false;
+        var active = Active ?? caret;
+        var anchor = Anchor ?? caret;
+        int line = active.Line;
+        int cell = active.Cell;
+        if (key is Key.Left or Key.Right)
+        {
+            int count = table.RowAtLine(line - 1)!.Cells.Count;
+            cell = Math.Clamp(cell + (key == Key.Left ? -1 : 1), 0, count - 1);
+        }
+        else
+        {
+            int step = key == Key.Up ? -1 : 1;
+            int next = line + step;
+            while (table.RowAtLine(next - 1) is { Kind: MdLineKind.TableSeparator }) next += step;
+            if (table.RowAtLine(next - 1) is { Cells.Count: > 0 } row)
+            {
+                line = next;
+                cell = Math.Min(cell, row.Cells.Count - 1);
+            }
+        }
+        var target = new Point(line, cell, 0);
+        SelectCells(anchor, target);
+        MoveCaretInto(target, bringIntoView: true);
+        return true;
+    }
+
     /// <summary>
     /// The caret goes into the text of the cell at <paramref name="hit"/> (that cell becomes the current one); the
     /// grid selection is kept.
     /// </summary>
-    private void MoveCaretInto(Point hit)
+    private void MoveCaretInto(Point hit, bool bringIntoView = false)
     {
         var area = _view.Editor.TextArea;
         _movingCaret = true;
@@ -118,6 +155,7 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
             int column = TableOf(hit.Line)?.RowAtLine(hit.Line - 1) is { } row && hit.Cell < row.Cells.Count
                 ? row.Cells[hit.Cell].ContentStart(_view.Document.GetText(line)) : 0;
             area.Caret.Offset = line.Offset + column;
+            if (bringIntoView) area.Caret.BringCaretToView();
         }
         finally { _movingCaret = false; }
     }
@@ -145,8 +183,11 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
     private void OnMoved(object? sender, PointerEventArgs e)
     {
         if (!_dragging || Anchor is not { } anchor) return;
-        if (HitTest(e) is { } hit && ReferenceEquals(TableOf(anchor.Line), TableOf(hit.Line)) && hit != Active)
-            Select(anchor, hit);
+        if (HitTest(e) is { } hit && ReferenceEquals(TableOf(anchor.Line), TableOf(hit.Line)))
+        {
+            if (_draggingCells) hit = hit with { Offset = 0 };
+            if (hit != Active) Select(anchor, hit);
+        }
         e.Handled = true;
     }
 
@@ -161,6 +202,8 @@ internal sealed class GridTextSelection : IBackgroundRenderer, IDisposable
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (Anchor is null || e.Key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift or Key.LeftAlt or Key.RightAlt) return;
+        if (e.KeyModifiers == KeyModifiers.Shift && e.Key is Key.Left or Key.Right or Key.Up or Key.Down) return;
+        if (e.KeyModifiers == KeyModifiers.None && e.Key == Key.Delete && CellBlock is not null) return;
         bool copy = (e.Key is Key.C or Key.Insert) && e.KeyModifiers == KeyModifiers.Control;
         if (!copy) Clear();
     }

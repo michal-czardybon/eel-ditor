@@ -92,10 +92,11 @@ public static partial class TableClipboard
     }
 
     /// <summary>Markdown table rows in <paramref name="text"/> (every non-empty line a row), separators left out; or null.</summary>
-    public static List<string>? MarkdownRows(string text)
+    public static List<string>? MarkdownRows(string text, bool requireClosingPipe = false)
     {
         var lines = text.Replace("\r\n", "\n").Split('\n').Where(l => l.Trim().Length > 0).ToList();
-        if (lines.Count == 0 || !lines.All(l => l.TrimStart().StartsWith('|'))) return null;
+        if (lines.Count == 0 || !lines.All(l => l.TrimStart().StartsWith('|')
+            && (!requireClosingPipe || l.TrimEnd().EndsWith('|') && l.Trim().Length > 1))) return null;
         return lines.Where(l => !SeparatorRegex().IsMatch(l)).ToList();
     }
 

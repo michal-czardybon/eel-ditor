@@ -697,6 +697,12 @@ public partial class MainWindow : Window
         if (_markdown is null || e.Handled) return;
         bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         bool plain = (e.KeyModifiers & ~KeyModifiers.Shift) == KeyModifiers.None;
+        if (e.KeyModifiers == KeyModifiers.Shift && e.Key is Key.Left or Key.Right or Key.Up or Key.Down
+            && _markdown.GridSelection.ExtendWithArrow(e.Key))
+        {
+            e.Handled = true;
+            return;
+        }
         // On a table drawn as a grid: the arrows go from cell to cell, Enter edits the current cell.
         if (e.KeyModifiers == KeyModifiers.None && e.Key is Key.Left or Key.Right or Key.Up or Key.Down or Key.Enter && HandleGridKey(e.Key))
         {
@@ -714,7 +720,8 @@ public partial class MainWindow : Window
                 break;
             case Key.Back when e.KeyModifiers == KeyModifiers.None:
             case Key.Delete when e.KeyModifiers == KeyModifiers.None:
-                if (MarkdownCommands.HandleDelete(Editor, _markdown, e.Key == Key.Back)) e.Handled = true;
+                if ((e.Key == Key.Delete && ClearSelectedCells())
+                    || MarkdownCommands.HandleDelete(Editor, _markdown, e.Key == Key.Back)) e.Handled = true;
                 break;
             case Key.Enter when plain:
                 // In a list: the next item (renumbered), or Shift+Enter for a line inside the item.

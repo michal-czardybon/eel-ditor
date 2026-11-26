@@ -155,6 +155,8 @@ public partial class MainWindow
         string ForRow(string text) => splitAnchors.Count == 0 ? text
             : TableCellEdit.JoinSplitStyles(text, splitAnchors.Where(a => !a.Anchor.IsDeleted).Select(a => a.Split with { Newline = a.Anchor.Offset }));
         editor.TextArea.SelectionBrush = Palette.Selection;
+        // After typing, the next vertical move starts from the caret's new visual column.
+        editor.TextChanged += (_, _) => editor.TextArea.Caret.DesiredXPos = double.NaN;
         var cellView = new MarkdownView(editor, editor.Document, Palette, _active?.DirectoryPath) { ShowImages = false };
         var trailingWhitespace = gridColumns is int cellColumns ? new CellTrailingWhitespaceGenerator(cellView, cellColumns) : null;
         if (trailingWhitespace is not null) editor.TextArea.TextView.ElementGenerators.Add(trailingWhitespace);
@@ -249,16 +251,16 @@ public partial class MainWindow
             if (!popup.IsOpen || saved || cancelled) return;
             quietScrollUntil = Environment.TickCount64 + 500;
             if (!Write(editor.Document.Text)) return;
-            Editor.TextArea.TextView.EnsureVisualLines();
-            if (view.CellRect(lineNumber, cellIndex) is { } now) popup.PlacementRect = Place(now);
             if (trailingWhitespace is not null && view.Model.TableAtLine(lineNumber - 1) is { } t
                 && view.GridLayout(t) is { } grid && cellIndex < grid.Widths.Length)
             {
                 trailingWhitespace.Columns = grid.Widths[cellIndex];
                 editor.Width = GridCellEditorSize(editor.Document.Text, trailingWhitespace.Columns).Width;
             }
+            if (view.CellRect(lineNumber, cellIndex) is { } now) popup.PlacementRect = Place(now);
         }
-        if (inPlace) editor.TextChanged += (_, _) => Dispatcher.UIThread.Post(Live, DispatcherPriority.Background);
+        // Update the column and the popup in the same input turn, before Avalonia lays out the inserted text.
+        if (inPlace) editor.TextChanged += (_, _) => Live();
 
         EventHandler scrolled = (_, _) => { if (popup.IsOpen && Environment.TickCount64 > quietScrollUntil) popup.IsOpen = false; };
         Editor.TextArea.TextView.ScrollOffsetChanged += scrolled;

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Threading;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using AvaloniaEdit.Rendering;
@@ -486,7 +487,7 @@ public partial class MainWindow
             result = MarkdownCommands.ClearFormatting(cellEditor, cellView);
             FocusEditor();
         }
-        else using (KeepCellSelection()) result = MarkdownCommands.ClearFormatting(Editor, _markdown);
+        else result = EditSelectedCellContents(() => MarkdownCommands.ClearFormatting(Editor, _markdown));
         var (cleared, skipped) = result;
         SetStatusMessage(skipped > 0 ? Loc.T("Md.ClearedSkipped", cleared, skipped) : Loc.T("Md.Cleared", cleared));
     }
@@ -494,8 +495,7 @@ public partial class MainWindow
     private void ConvertStyle(MdStyle from, MdStyle to)
     {
         if (_markdown is null || Editor.IsReadOnly) return;
-        (int converted, int skipped) result;
-        using (KeepCellSelection()) result = MarkdownCommands.ConvertStyle(Editor, _markdown, from, to);
+        var result = EditSelectedCellContents(() => MarkdownCommands.ConvertStyle(Editor, _markdown, from, to));
         var (converted, skipped) = result;
         SetStatusMessage(skipped > 0 ? Loc.T("Convert.DoneSkipped", converted, skipped) : Loc.T("Convert.Done", converted));
     }
@@ -510,7 +510,7 @@ public partial class MainWindow
             failed = MarkdownCommands.ToggleStyle(cellEditor, cellView, marker, style);
             FocusEditor();
         }
-        else using (KeepCellSelection()) failed = MarkdownCommands.ToggleStyle(Editor, _markdown, marker, style);
+        else failed = EditSelectedCellContents(() => MarkdownCommands.ToggleStyle(Editor, _markdown, marker, style));
         if (failed > 0) SetStatusMessage(Loc.T("Md.StyleSkipped", failed));
     }
 
@@ -540,6 +540,128 @@ public partial class MainWindow
     private TableSelectionRenderer? _tableSelection;
     private bool _keepingCells;
 
+    private sealed record CellSelectionState(
+        GridTextSelection.Point? Anchor, GridTextSelection.Point? Active,
+        int CaretOffset, int TableLine, int RowLine, int Column, CellRange[] Ranges)
+    {
+        public bool IsSelected => Anchor is { } a && Active is { } b && a != b || Ranges.Length > 0;
+    }
+
+    private CellSelectionState CaptureCellSelection()
+    {
+        var grid = _markdown?.GridSelection;
+        var text = _tableSelection;
+        return new(grid?.Anchor, grid?.Active, Editor.CaretOffset, text?.TableLine ?? -1, text?.RowLine ?? -1, text?.Column ?? -1,
+            text?.Ranges.ToArray() ?? []);
+    }
+
+    private void ApplyWithCellSelectionUndo(Action edit)
+    {
+        var before = CaptureCellSelection();
+        if (!before.IsSelected) { edit(); return; }
+        var doc = Editor.Document;
+        var after = before;
+        void Restore(CellSelectionState state) => Dispatcher.UIThread.Post(() =>
+        {
+            if (!ReferenceEquals(Editor.Document, doc) || _markdown is not { } view) return;
+            Editor.CaretOffset = Math.Clamp(state.CaretOffset, 0, doc.TextLength);
+            view.GridSelection.Clear();
+            if (view.TablesAsGrid && state.Anchor is { } anchor && state.Active is { } active)
+                view.GridSelection.Select(anchor, active);
+            if (_tableSelection is { } text)
+            {
+                text.TableLine = state.TableLine;
+                text.RowLine = state.RowLine;
+                text.Column = state.Column;
+                text.Ranges = view.TablesAsGrid ? [] : [.. state.Ranges];
+                Editor.TextArea.TextView.InvalidateLayer(text.Layer);
+            }
+        }, DispatcherPriority.Send);
+
+        doc.UndoStack.StartUndoGroup();
+        try
+        {
+            doc.UndoStack.PushOptional(new CellSelectionUndo(() => Restore(before), () => Restore(after)));
+            edit();
+            after = CaptureCellSelection();
+        }
+        finally { doc.UndoStack.EndUndoGroup(); }
+    }
+
+    private sealed class CellSelectionUndo(Action undo, Action redo) : IUndoableOperation
+    {
+        public void Undo() => undo();
+        public void Redo() => redo();
+    }
+
+    private T EditSelectedCellContents<T>(Func<T> edit)
+    {
+        T result = default!;
+        ApplyWithCellSelectionUndo(() =>
+        {
+            using var selection = KeepCellSelection();
+            result = edit();
+        });
+        return result;
+    }
+
+    private bool ClearSelectedCells()
+    {
+        if (_markdown is not { } view || Editor.SelectionLength > 0
+            || MarkdownCommands.TableAtCaret(Editor, view) is not var (table, row, column)) return false;
+
+        var block = SelectedCellBlock();
+        if (block is null)
+        {
+            if (!view.TablesAsGrid || view.GridSelection.HasSelection || table.Rows[row].Kind == MdLineKind.TableSeparator)
+                return false;
+            block = ([table.Rows[row].LineIndex + 1], column, column);
+        }
+        if (Editor.IsReadOnly) return true;
+
+        var (lines, first, last) = block.Value;
+        var edits = TableEditor.ClearCells(table, view.Source, lines.Select(line => line - 1), first, last);
+        if (edits.Count == 0) return true;
+
+        ApplyWithCellSelectionUndo(() =>
+        {
+            using var selection = KeepCellSelection();
+            MarkdownCommands.Apply(Editor.Document, edits);
+            int rowIndex = table.Rows[row].LineIndex;
+            var line = Editor.Document.GetLineByNumber(rowIndex + 1);
+            if (view.Model.TableAtLine(rowIndex)?.RowAtLine(rowIndex) is { } updated && column < updated.Cells.Count)
+                Editor.CaretOffset = line.Offset + updated.Cells[column].ContentStart(Editor.Document.GetText(line));
+        });
+        return true;
+    }
+
+    private bool DeleteSelectedTableParts(TableCommand command)
+    {
+        if (command is not (TableCommand.DeleteRow or TableCommand.DeleteColumn) || _markdown is not { } view
+            || SelectedCellBlock() is not { } block
+            || view.Model.TableAtLine(block.Lines[0] - 1) is not { } table) return false;
+        if (Editor.IsReadOnly) return true;
+
+        if (command == TableCommand.DeleteColumn && block.FirstCell == 0 && block.LastCell >= table.ColumnCount - 1)
+        {
+            MarkdownCommands.RunTableCommand(Editor, view, TableCommand.DeleteTable);
+            return true;
+        }
+
+        var edits = command == TableCommand.DeleteColumn
+            ? TableEditor.DeleteColumns(table, block.FirstCell, block.LastCell)
+            : block.Lines.SelectMany(line => TableEditor.DeleteRow(table, line - 1 - table.FirstLine)).ToList();
+        if (edits.Count == 0) return true;
+        view.GridSelection.Clear();
+        if (_tableSelection is { } selection)
+        {
+            selection.Ranges = [];
+            Editor.TextArea.TextView.InvalidateLayer(selection.Layer);
+        }
+        MarkdownCommands.Apply(Editor.Document, edits);
+        return true;
+    }
+
     /// <summary>
     /// Keeps the selected cells (a grid selection, or Select column / row in a table shown as text) while a style
     /// command changes them, so the next command applies to the same cells. A text-mode selection is held as source
@@ -565,10 +687,11 @@ public partial class MainWindow
         public void Dispose() => action();
     }
 
-    /// <summary>Highlights a table column (or row). Copy then copies it as tab separated values.</summary>
+    /// <summary>Highlights a table column (or row) for styling or copying.</summary>
     private void SelectTablePart(bool column)
     {
         if (_markdown is null || MarkdownCommands.TableAtCaret(Editor, _markdown) is not var (table, row, col)) return;
+        Editor.TextArea.ClearSelection();
         if (_markdown.TablesAsGrid)
         {
             // A table drawn as a grid shows no source text: the grid's own selection takes the cells (Ctrl+C copies them).
@@ -586,15 +709,17 @@ public partial class MainWindow
             Editor.TextArea.TextView.BackgroundRenderers.Add(_tableSelection);
             Editor.TextArea.Caret.PositionChanged += (_, _) =>
             {
-                if (_tableSelection.Ranges.Count > 0 && !_tableSelection.Sticky && !_keepingCells) { _tableSelection.Ranges = []; Editor.TextArea.TextView.InvalidateLayer(KnownLayer.Background); }
-                _tableSelection.Sticky = false;
+                if (_tableSelection.Ranges.Count > 0 && !_keepingCells)
+                {
+                    _tableSelection.Ranges = [];
+                    Editor.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
+                }
             };
         }
         _tableSelection.Ranges = ranges.ToList();
         _tableSelection.Column = column ? col : -1;
         _tableSelection.TableLine = table.FirstLine;
         _tableSelection.RowLine = table.Rows[row].LineIndex;
-        _tableSelection.Sticky = true;
         Editor.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
         SetStatusMessage(Loc.T(column ? "Table.ColumnSelected" : "Table.RowSelected"));
     }
@@ -602,8 +727,8 @@ public partial class MainWindow
     private async Task CopyTableColumnAsync()
     {
         if (_markdown is null || MarkdownCommands.TableAtCaret(Editor, _markdown) is not var (table, _, col)) return;
-        string nl = NewLineAt(Editor.TextArea.Caret.Line);
-        await CopyToClipboardAsync(TableEditor.ColumnAsTsv(table, _markdown.Source, col, nl));
+        var lines = table.Rows.Where(r => r.Kind != MdLineKind.TableSeparator).Select(r => r.LineIndex + 1).ToList();
+        await CopyCellsAsync((lines, col, col));
     }
 
     private sealed class TableSelectionRenderer(MainWindow window) : IBackgroundRenderer
@@ -612,7 +737,6 @@ public partial class MainWindow
         public int Column { get; set; } = -1;
         public int TableLine { get; set; }
         public int RowLine { get; set; }
-        public bool Sticky { get; set; }
         public KnownLayer Layer => KnownLayer.Selection;
 
         public void Draw(TextView textView, DrawingContext drawingContext)

@@ -9,8 +9,8 @@ namespace EelDitor.App.Views;
 
 /// <summary>
 /// Copy, cut and paste of table cells and rows. Copy puts Markdown rows (plain text) and an HTML table (Word, Excel)
-/// on the clipboard; paste inserts rows above the current row (from Markdown rows, an HTML table from Word or a web
-/// page, or tab-separated text from Excel), and outside a table turns a pasted HTML table into a Markdown table.
+/// on the clipboard. Paste overwrites from the top-left selected cell or the current cell, growing the table when
+/// needed. Outside a table, pasted rows or HTML can form a new Markdown table.
 /// </summary>
 public partial class MainWindow
 {
@@ -53,8 +53,9 @@ public partial class MainWindow
                 int start = cell.ContentStart(text);
                 return (Start: start, End: Math.Max(start, cell.ContentEnd(text)));
             }).ToList();
-            // Whole rows keep their source exactly; part of a row becomes a row of those cells.
-            markdown.Add(wholeRows ? text : TableClipboard.Row(cells.Select(c => text[c.Start..c.End]).ToList(), cells.Count));
+            // Give copied fragments outer pipes even when the original table left them implicit.
+            bool boundedRow = wholeRows && row.HasLeadingPipe && row.Cells.LastOrDefault()?.HasClosingPipe == true;
+            markdown.Add(boundedRow ? text : TableClipboard.Row(cells.Select(c => text[c.Start..c.End]).ToList(), cells.Count));
             if (header) markdown.Add(TableClipboard.Separator(cells.Count));
             html.Add(cells.Select(c => MarkdownHtml.Inline(text, render, c.Start, c.End, header ? MdStyle.Bold : MdStyle.None)).ToList());
         }
@@ -79,8 +80,10 @@ public partial class MainWindow
         var body = block.Lines.Where(n => table.RowAtLine(n - 1)?.Kind == MdLineKind.TableBody).OrderByDescending(n => n).ToList();
         if (!wholeRows || body.Count == 0) return;
         var doc = Editor.Document;
-        _markdown.GridSelection.Clear();
-        using (doc.RunUpdate())
+        ApplyWithCellSelectionUndo(() =>
+        {
+            _markdown.GridSelection.Clear();
+            using var update = doc.RunUpdate();
             foreach (int n in body)
             {
                 var line = doc.GetLineByNumber(n);
@@ -88,6 +91,7 @@ public partial class MainWindow
                 if (line.DelimiterLength == 0 && line.PreviousLine is { } previous) start = previous.EndOffset;
                 doc.Remove(start, end - start);
             }
+        });
     }
 
     private async Task<(string? Html, string? Text)> ReadClipboardAsync()
@@ -128,10 +132,13 @@ public partial class MainWindow
     internal async Task PasteContentAsync(string? html, string? text)
     {
         if (_markdown is null || Editor.IsReadOnly) return;
-        var lines = MarkdownCommands.TableAtCaret(Editor, _markdown) is var (table, _, _) ? RowsToPaste(html, text, table.ColumnCount) : null;
-        if (lines is { Count: > 0 } && MarkdownCommands.TableAtCaret(Editor, _markdown) is var (t, row, _))
+        if (MarkdownCommands.TableAtCaret(Editor, _markdown) is var (table, row, column)
+            && CellsToPaste(html, text) is { Count: > 0 } cells)
         {
-            PasteRows(t, row, lines);
+            var selection = SelectedCellBlock();
+            int target = selection is { } block ? block.Lines.Min() - 1 : table.Rows[row].LineIndex;
+            if (target == table.Separator.LineIndex) target++;
+            ApplyWithCellSelectionUndo(() => PasteCells(table, target, selection?.FirstCell ?? column, cells));
             return;
         }
         // Outside a table: text from Word (Outlook, LibreOffice, Google Docs) keeps its lists, tables, headings and
@@ -141,7 +148,18 @@ public partial class MainWindow
             await PasteTextAsync(OnLinesOfItsOwn(markdown));
             return;
         }
-        if (html is not null && TableClipboard.FromHtml(html) is { Count: > 0 } rows && TableClipboard.MarkdownRows(text ?? "") is null)
+        // Prefer the Markdown source of copied grid cells so that formatting and explicit breaks round-trip.
+        if (text is not null && TableClipboard.MarkdownRows(text, requireClosingPipe: true) is { Count: > 0 } sourceRows)
+        {
+            var model = MarkdownDocument.Parse(text);
+            if (model.Tables.Count == 1 && model.Tables[0].FirstLine == 0
+                && model.Tables[0].Rows.Count == sourceRows.Count + 1)
+                InsertTableBlock(text.TrimEnd('\r', '\n'));
+            else
+                InsertNewTable(sourceRows.Select(RowContents).ToList(), header: false);
+            return;
+        }
+        if (html is not null && TableClipboard.FromHtml(html) is { Count: > 0 } rows)
         {
             InsertNewTable(rows, TableClipboard.HasHeader(html));
             return;
@@ -198,42 +216,39 @@ public partial class MainWindow
         area.Caret.BringCaretToView();
     }
 
-    /// <summary>The Markdown rows to paste into a table of <paramref name="columns"/> columns, or null when the clipboard has none.</summary>
-    private static List<string>? RowsToPaste(string? html, string? text, int columns)
+    private static List<List<string>>? CellsToPaste(string? html, string? text)
     {
         if (text is not null && TableClipboard.MarkdownRows(text) is { Count: > 0 } markdown)
-            return markdown.Select(l =>
-            {
-                var r = MarkdownDocument.SplitRow(l, 0, MdLineKind.TableBody);
-                // The same number of columns: the row as written; otherwise its cells fitted to this table.
-                return r.Cells.Count == columns ? l.Trim() : TableClipboard.Row(r.Cells.Select(c => l[c.ContentStart(l)..c.ContentEnd(l)]).ToList(), columns);
-            }).ToList();
-        if (html is not null && TableClipboard.FromHtml(html) is { Count: > 0 } fromHtml)
-            return fromHtml.Select(r => TableClipboard.Row(r, columns)).ToList();
-        if (text is not null && TableClipboard.FromTsv(text) is { Count: > 0 } tsv)
-            return tsv.Select(r => TableClipboard.Row(r, columns)).ToList();
-        return null;
+            return markdown.Select(RowContents).Where(row => row.Count > 0).ToList();
+        var rows = html is not null ? TableClipboard.FromHtml(html) : null;
+        rows ??= text is not null ? TableClipboard.FromTsv(text) : null;
+        return rows?.Select(row => row.Select(TableClipboard.Escape).ToList()).ToList();
     }
 
-    /// <summary>Inserts rows above the current row (below the separator when the current row is the header).</summary>
-    private void PasteRows(MarkdownTable table, int rowIndex, List<string> lines)
-    {
-        var doc = Editor.Document;
-        // The current row: in a grid the one with a selection or the current cell; else the caret's.
-        int target = _markdown?.TablesAsGrid == true && _markdown.GridSelection.CellBlock is { } block ? block.Lines.Min() - 1 : table.FirstLine + rowIndex;
-        if (target <= table.FirstLine + 1) target = table.FirstLine + 2;
-        string nl = NewLineAt(table.FirstLine + 1);
-        _markdown?.GridSelection.Clear();
-        using (doc.RunUpdate())
+    private static List<string> RowContents(string line) =>
+        MarkdownDocument.SplitRow(line, 0, MdLineKind.TableBody).Cells.Select(cell =>
         {
-            if (target <= table.LastLine)
-                doc.Insert(doc.GetLineByNumber(target + 1).Offset, string.Join(nl, lines) + nl);
-            else
-                doc.Insert(doc.GetLineByNumber(table.LastLine + 1).EndOffset, nl + string.Join(nl, lines));
+            int start = cell.ContentStart(line);
+            return line[start..Math.Max(start, cell.ContentEnd(line))];
+        }).ToList();
+
+    private void PasteCells(MarkdownTable table, int target, int column, List<List<string>> cells)
+    {
+        var view = _markdown!;
+        var doc = Editor.Document;
+        view.GridSelection.Clear();
+        if (_tableSelection is { Ranges.Count: > 0 } selection)
+        {
+            selection.Ranges = [];
+            Editor.TextArea.TextView.InvalidateLayer(AvaloniaEdit.Rendering.KnownLayer.Background);
         }
-        var first = doc.GetLineByNumber(Math.Min(target + 1, doc.LineCount));
-        Editor.CaretOffset = first.Offset + Math.Min(2, first.Length);
-        SetStatusMessage(Loc.T("Table.Pasted", lines.Count));
+        Editor.TextArea.ClearSelection();
+        MarkdownCommands.Apply(doc, TableEditor.PasteCells(table, view.Source, target, column, cells));
+        var line = doc.GetLineByNumber(target + 1);
+        if (view.Model.TableAtLine(target)?.RowAtLine(target) is { } row && column < row.Cells.Count)
+            Editor.CaretOffset = line.Offset + row.Cells[column].ContentStart(doc.GetText(line));
+        Editor.TextArea.Caret.BringCaretToView();
+        SetStatusMessage(Loc.T("Table.Pasted", cells.Count));
     }
 
     /// <summary>
@@ -243,18 +258,32 @@ public partial class MainWindow
     /// </summary>
     private void InsertNewTable(List<List<string>> rows, bool header)
     {
-        var doc = Editor.Document;
         int columns = rows.Max(r => r.Count);
-        var line = doc.GetLineByOffset(Editor.CaretOffset);
-        string nl = NewLineAt(line.LineNumber);
         var table = new List<string> { TableClipboard.Row(header ? rows[0] : [], columns), TableClipboard.Separator(columns) };
         table.AddRange(rows.Skip(header ? 1 : 0).Select(r => TableClipboard.Row(r, columns)));
-        int caret = Editor.CaretOffset;
-        bool atLineStart = caret == line.Offset;
-        bool blankBefore = line.LineNumber == 1 || (atLineStart && doc.GetText(line.PreviousLine!).Trim().Length == 0);
-        string text = (atLineStart ? "" : nl) + (blankBefore ? "" : nl) + string.Join(nl, table) + nl
-            + (caret < line.EndOffset || line.NextLine is { } next && doc.GetText(next).Trim().Length > 0 ? nl : "");
-        doc.Insert(caret, text);
+        InsertTableBlock(string.Join('\n', table));
         SetStatusMessage(Loc.T("Table.PastedTable", rows.Count, columns));
+    }
+
+    private void InsertTableBlock(string table)
+    {
+        var doc = Editor.Document;
+        var area = Editor.TextArea;
+        int start = Editor.SelectionLength > 0 ? Editor.SelectionStart : Editor.CaretOffset;
+        int end = start + Editor.SelectionLength;
+        var first = doc.GetLineByOffset(start);
+        var last = doc.GetLineByOffset(end);
+        string nl = NewLineAt(first.LineNumber);
+        bool before = !string.IsNullOrWhiteSpace(doc.GetText(first.Offset, start - first.Offset));
+        bool after = !string.IsNullOrWhiteSpace(doc.GetText(end, last.EndOffset - end));
+        string prefix = before ? nl + nl
+            : start > first.Offset || first.PreviousLine is { } previous && !string.IsNullOrWhiteSpace(doc.GetText(previous)) ? nl : "";
+        string suffix = after ? nl + nl
+            : last.NextLine is { } next && !string.IsNullOrWhiteSpace(doc.GetText(next)) ? nl
+            : last.DelimiterLength == 0 ? nl : "";
+        // A newly inserted table needs a blank boundary on both sides of neighboring text.
+        area.Selection.ReplaceSelectionWithText(prefix
+            + AvaloniaEdit.Document.TextUtilities.NormalizeNewLines(table, nl) + suffix);
+        area.Caret.BringCaretToView();
     }
 }

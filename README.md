@@ -1,5 +1,7 @@
 # Eel-ditor
 
+[Release notes](docs/RELEASE_NOTES.md)
+
 Eel-ditor is a dark-themed, plain **text editor** that can wrap **Markdown** content well, and works with **git**, leaving no traces in the **diff**.
 
 ## Eel

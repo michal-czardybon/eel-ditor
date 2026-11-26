@@ -120,9 +120,11 @@ public partial class MainWindow
             await board.SetTextAsync(shown);
             return;
         }
-        if (Editor.SelectionLength == 0 && _markdown is { TablesAsGrid: true, CurrentCell: { } current })
+        if (Editor.SelectionLength == 0 && _markdown is { } markdown
+            && MarkdownCommands.TableAtCaret(Editor, markdown) is { } location
+            && location.Table.Rows[location.Row].Kind != MdLineKind.TableSeparator)
         {
-            await CopyCellsAsync(([current.Line], current.Cell, current.Cell));
+            await CopyCellsAsync(([location.Table.Rows[location.Row].LineIndex + 1], location.Column, location.Column));
             return;
         }
         if (_markdown is not null && MarkdownCommands.BalancedSelectionText(Editor, _markdown) is { } text && Clipboard is { } clipboard)
@@ -155,7 +157,14 @@ public partial class MainWindow
 
     private void Table(TableCommand c)
     {
-        if (_markdown is not null) MarkdownCommands.RunTableCommand(Editor, _markdown, c);
+        if (_markdown is not { } view) return;
+        if (c is TableCommand.DeleteRow or TableCommand.DeleteColumn or TableCommand.DeleteTable)
+            ApplyWithCellSelectionUndo(() =>
+            {
+                if (!DeleteSelectedTableParts(c)) MarkdownCommands.RunTableCommand(Editor, view, c);
+            });
+        else
+            MarkdownCommands.RunTableCommand(Editor, view, c);
     }
 
     /// <summary>
